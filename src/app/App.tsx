@@ -1,17 +1,60 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useUIStore } from "@/stores/ui";
+import { useWorkspaceStore } from "@/stores/workspace";
+import { useProviderStore } from "@/stores/provider";
 import { initAppDirs } from "@/services/providers/storage";
+import { listWorkspaces, createWorkspace, newWorkspace } from "@/services/workspace";
+import { listProviders } from "@/services/providers/storage";
+import { SuperAgentPanel } from "@/components/super-agent/SuperAgentPanel";
+import { ChatPanel } from "@/components/chat/ChatPanel";
+import { PreviewPanel } from "@/components/preview/PreviewPanel";
+import { WorkspaceTabBar } from "@/components/workspace/WorkspaceTabBar";
 import { ProviderSettings } from "@/components/provider/ProviderSettings";
+import { CommandPalette } from "@/components/super-agent/CommandPalette";
+import type { RenderableContent } from "@/types";
 
 export default function App() {
   const { theme, toggleTheme, openSettings, openCommandPalette } = useUIStore();
+  const { workspaces, activeWorkspaceId, setWorkspaces, setActiveWorkspace, addWorkspace } =
+    useWorkspaceStore();
+  const { setProviders } = useProviderStore();
 
-  // Bootstrap app directories on first load
+  // Preview content keyed by workspace id
+  const [previewMap, setPreviewMap] = useState<Record<string, RenderableContent>>({});
+
+  const activeWorkspace = workspaces.find((ws) => ws.id === activeWorkspaceId);
+  const previewContent = activeWorkspaceId ? (previewMap[activeWorkspaceId] ?? null) : null;
+
+  // Bootstrap on mount
   useEffect(() => {
-    initAppDirs().catch((err: unknown) =>
-      console.warn("Could not init app dirs (expected in browser mode):", err)
-    );
     document.documentElement.dataset.theme = theme;
+
+    async function bootstrap() {
+      try {
+        await initAppDirs();
+      } catch {
+        // browser mode: skip
+      }
+      try {
+        const [wsList, provList] = await Promise.all([listWorkspaces(), listProviders()]);
+        setWorkspaces(wsList);
+        setProviders(provList);
+
+        if (wsList.length > 0) {
+          setActiveWorkspace(wsList[0].id);
+        } else {
+          // Create a default workspace on first run
+          const defaultWs = newWorkspace("My First Workspace", "ollama", "llama3.2");
+          await createWorkspace(defaultWs).catch(() => {});
+          addWorkspace(defaultWs);
+          setActiveWorkspace(defaultWs.id);
+        }
+      } catch {
+        // browser mode
+      }
+    }
+
+    bootstrap();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Global keyboard shortcuts
@@ -25,9 +68,16 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [openSettings, openCommandPalette]);
 
+  function handlePreview(workspaceId: string, content: string) {
+    setPreviewMap((prev) => ({
+      ...prev,
+      [workspaceId]: { type: "markdown", content },
+    }));
+  }
+
   return (
-    <div className="app" style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-      {/* Titlebar */}
+    <div className="app">
+      {/* ── TITLEBAR ── */}
       <div className="titlebar">
         <div className="wordmark">
           <div className="wm-mark">
@@ -36,9 +86,7 @@ export default function App() {
               <line x1="5" y1="2" x2="5" y2="8" />
             </svg>
           </div>
-          <span className="wm-text">
-            mind<em>eck</em>
-          </span>
+          <span className="wm-text">mind<em>eck</em></span>
         </div>
         <div className="tb-sep" />
         <div className="tb-spacer" />
@@ -59,15 +107,36 @@ export default function App() {
         </div>
       </div>
 
-      {/* Main body placeholder — workspace layout comes in Phase 1.3 */}
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <p style={{ color: "var(--color-t2)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-          mindeck · v0.1 · open ⌘, to configure providers
-        </p>
+      {/* ── MAIN BODY: 3-column layout ── */}
+      <div className="body">
+        {/* Column 1: Super Agent (permanent) */}
+        <SuperAgentPanel />
+
+        {/* Column 2+3: Workspace area */}
+        <div className="workspace-area">
+          {activeWorkspace ? (
+            <>
+              <ChatPanel
+                workspace={activeWorkspace}
+                onPreview={(content) => handlePreview(activeWorkspace.id, content)}
+              />
+              <div className="split" />
+              <PreviewPanel content={previewContent} />
+            </>
+          ) : (
+            <div className="workspace-empty">
+              <p>Create a workspace to get started.</p>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Overlays */}
+      {/* ── TAB BAR ── */}
+      <WorkspaceTabBar workspaces={workspaces} activeId={activeWorkspaceId} />
+
+      {/* ── OVERLAYS ── */}
       <ProviderSettings />
+      <CommandPalette />
     </div>
   );
 }

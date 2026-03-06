@@ -17,6 +17,15 @@ pub fn run() {
             commands::provider::save_provider,
             commands::provider::delete_provider,
             commands::provider::init_app_dirs,
+            // workspace
+            commands::workspace::list_workspaces,
+            commands::workspace::create_workspace,
+            commands::workspace::update_workspace,
+            commands::workspace::delete_workspace,
+            // chat
+            commands::chat::load_messages,
+            commands::chat::append_message,
+            commands::chat::clear_messages,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
