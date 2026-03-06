@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mindeck — Agent Workflow OS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ─── TOKENS ─────────────────────────────────────────── */
+    :root {
+      /* workspace accent — emerald */
+      --ac:        #10b981;
+      --ac-dim:    rgba(16,185,129,0.09);
+      --ac-border: rgba(16,185,129,0.22);
+      --ac-bar:    rgba(16,185,129,0.75);
+
+      /* super agent accent — violet */
+      --sa:        #a78bfa;
+      --sa-dim:    rgba(167,139,250,0.09);
+      --sa-border: rgba(167,139,250,0.25);
+      --sa-bar:    rgba(167,139,250,0.7);
+
+      --yellow:     #f59e0b;
+      --yd:         rgba(245,158,11,0.1);
+      --yb:         rgba(245,158,11,0.2);
+
+      --r-xs: 3px; --r-sm: 5px; --r-md: 8px; --r-lg: 12px;
+      --font: 'Plus Jakarta Sans', sans-serif;
+      --mono: 'JetBrains Mono', monospace;
+    }
+
+    [data-theme="dark"] {
+      --bg-0: #111110;  --bg-1: #181714;  --bg-2: #1f1e1b;
+      --bg-3: #272521;  --bg-4: #302e2a;  --bg-5: #3a3834;
+      --bdd: #201f1c; --bd: #2e2c28; --bdh: #3e3c37;
+      --t0: #edeae3; --t1: #8a8279; --t2: #48443e;
+      --sh: rgba(0,0,0,0.55); --shl: rgba(0,0,0,0.72);
+    }
+
+    [data-theme="light"] {
+      --ac:        #059669;
+      --ac-dim:    rgba(5,150,105,0.09);
+      --ac-border: rgba(5,150,105,0.22);
+      --ac-bar:    rgba(5,150,105,0.7);
+      --sa:        #7c3aed;
+      --sa-dim:    rgba(124,58,237,0.08);
+      --sa-border: rgba(124,58,237,0.22);
+      --sa-bar:    rgba(124,58,237,0.6);
+      --bg-0: #ede8e0; --bg-1: #f8f5f0; --bg-2: #ffffff;
+      --bg-3: #f2ede7; --bg-4: #e9e4dc; --bg-5: #ddd8cf;
+      --bdd: #e5e0d8; --bd: #d5d0c6; --bdh: #c0bab0;
+      --t0: #1c1a17; --t1: #5e5a52; --t2: #a09890;
+      --sh: rgba(0,0,0,0.10); --shl: rgba(0,0,0,0.20);
+    }
+
+    /* ─── BASE ───────────────────────────────────────────── */
+    html, body { height: 100%; background: var(--bg-0); color: var(--t0);
+      font-family: var(--font); font-size: 13px; line-height: 1;
+      -webkit-font-smoothing: antialiased; overflow: hidden;
+      transition: background 0.25s, color 0.25s; }
+
+    /* ══════════════════════════════════════════════════════
+       APP SHELL
+    ══════════════════════════════════════════════════════ */
+    .app { height: 100vh; display: flex; flex-direction: column; }
+
+    /* ── TITLEBAR ── */
+    .titlebar {
+      height: 40px;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--bdd);
+      display: flex; align-items: center;
+      padding: 0 14px 0 16px;
+      flex-shrink: 0; gap: 10px;
+    }
+
+    .wordmark {
+      font-family: var(--mono); font-weight: 500; font-size: 12.5px;
+      letter-spacing: 0.04em; color: var(--t0); user-select: none;
+      flex-shrink: 0; display: flex; align-items: center; gap: 7px;
+    }
+    .wm-mark {
+      width: 18px; height: 18px; background: var(--ac); border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .wm-mark svg { width: 10px; height: 10px; color: #fff; }
+    .wm-text em { color: var(--ac); font-style: normal; }
+
+    .tb-sep { width: 1px; height: 14px; background: var(--bd); flex-shrink: 0; }
+    .tb-spacer { flex: 1; }
+
+    .tb-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+    .cmd-k {
+      display: flex; align-items: center; gap: 5px;
+      padding: 4px 9px; border-radius: var(--r-sm);
+      border: 1px solid var(--bd); background: var(--bg-3);
+      color: var(--t1); cursor: pointer; font-family: var(--font);
+      font-size: 11px; transition: all 0.15s;
+    }
+    .cmd-k:hover { border-color: var(--ac); color: var(--ac); background: var(--ac-dim); }
+    .cmd-k kbd {
+      font-family: var(--mono); font-size: 10px;
+      background: var(--bg-5); padding: 1px 4px;
+      border-radius: var(--r-xs); border: 1px solid var(--bdh); color: var(--t0);
+    }
+
+    .icon-btn {
+      width: 28px; height: 28px; border-radius: var(--r-sm);
+      border: none; background: transparent; color: var(--t2);
+      cursor: pointer; display: flex; align-items: center;
+      justify-content: center; transition: all 0.15s;
+    }
+    .icon-btn:hover { background: var(--bg-3); color: var(--t1); }
+    .icon-btn svg { width: 15px; height: 15px; }
+
+    .theme-btn {
+      width: 28px; height: 28px; border-radius: var(--r-sm);
+      border: none; background: transparent; color: var(--t2);
+      cursor: pointer; display: flex; align-items: center;
+      justify-content: center; font-size: 14px; transition: all 0.15s;
+    }
+    .theme-btn:hover { background: var(--bg-3); color: var(--t0); }
+
+    /* ── BODY ── */
+    .body { flex: 1; display: flex; overflow: hidden; }
+
+    /* ══════════════════════════════════════════════════════
+       SUPER AGENT PANEL  (permanent left column)
+    ══════════════════════════════════════════════════════ */
+    .sa-panel {
+      width: 262px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-1);
+      border-right: 1px solid var(--bd);
+      position: relative;
+    }
+
+    /* subtle violet left edge — visual identity mark */
+    .sa-panel::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom,
+        transparent 0%,
+        var(--sa-bar) 20%,
+        var(--sa-bar) 80%,
+        transparent 100%);
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    /* Panel header */
+    .sa-head {
+      height: 42px; padding: 0 14px;
+      display: flex; align-items: center; gap: 9px;
+      border-bottom: 1px solid var(--bdd); flex-shrink: 0;
+    }
+    .sa-icon {
+      width: 24px; height: 24px; border-radius: 6px;
+      background: var(--sa-dim); border: 1px solid var(--sa-border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; flex-shrink: 0; color: var(--sa);
+    }
+    .sa-title { font-size: 12.5px; font-weight: 600; color: var(--t0); flex: 1; }
+    .sa-global {
+      font-size: 9.5px; font-family: var(--mono); color: var(--t2);
+      background: var(--bg-3); padding: 2px 6px; border-radius: var(--r-xs);
+      border: 1px solid var(--bdd);
+    }
+
+    /* Compact workspace status rows */
+    .sa-ws-section {
+      flex-shrink: 0;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--bdd);
+    }
+    .sa-ws-label {
+      font-size: 9.5px; font-family: var(--mono);
+      text-transform: uppercase; letter-spacing: 0.09em;
+      color: var(--t2); padding: 0 14px; margin-bottom: 4px;
+    }
+
+    .sa-ws-item {
+      display: flex; align-items: center;
+      gap: 8px; padding: 6px 14px;
+      cursor: pointer; transition: background 0.1s;
+      border: none; background: transparent;
+      width: 100%; text-align: left; font-family: var(--font);
+    }
+    .sa-ws-item:hover { background: var(--bg-3); }
+    .sa-ws-item.on { background: var(--ac-dim); }
+
+    .sa-ws-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .sa-ws-dot.active  { background: var(--ac); animation: pulse-dot 2.6s ease-in-out infinite; }
+    .sa-ws-dot.pending { background: var(--yellow); }
+    .sa-ws-dot.idle    { background: var(--t2); }
+
+    .sa-ws-info { flex: 1; min-width: 0; }
+    .sa-ws-name { font-size: 11.5px; color: var(--t0); font-weight: 500; margin-bottom: 1px; }
+    .sa-ws-snip {
+      font-size: 10px; color: var(--t2); font-family: var(--mono);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .sa-ws-badge {
+      font-size: 9px; font-family: var(--mono);
+      padding: 2px 5px; border-radius: var(--r-xs); flex-shrink: 0;
+    }
+    .sa-ws-badge.active  { background: var(--ac-dim); color: var(--ac); border: 1px solid var(--ac-border); }
+    .sa-ws-badge.pending { background: var(--yd); color: var(--yellow); border: 1px solid var(--yb); }
+    .sa-ws-badge.idle    { background: var(--bg-4); color: var(--t2); border: 1px solid var(--bd); }
+
+    /* SA chat messages */
+    .sa-messages {
+      flex: 1; overflow-y: auto;
+      padding: 12px 0 4px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .sa-messages::-webkit-scrollbar { width: 2px; }
+    .sa-messages::-webkit-scrollbar-thumb { background: var(--bd); }
+
+    .sa-msg { padding: 6px 16px 8px; position: relative; }
+
+    .sa-msg.ai {
+      border-left: 2px solid var(--sa-bar);
+      margin-left: 12px; padding-left: 12px;
+    }
+    .sa-msg.user {
+      background: var(--sa-dim);
+      border-radius: 0 var(--r-sm) var(--r-sm) 0;
+    }
+
+    .sa-msg-lbl {
+      font-family: var(--mono); font-size: 9.5px; font-weight: 500;
+      text-transform: uppercase; letter-spacing: 0.09em;
+      color: var(--t2); margin-bottom: 4px;
+    }
+    .sa-msg.ai .sa-msg-lbl { color: var(--sa); opacity: 0.75; }
+
+    .sa-msg-body { font-size: 12px; line-height: 1.65; color: var(--t0); }
+    .sa-msg.user .sa-msg-body { color: var(--t1); }
+    .sa-msg-body strong { color: var(--t0); font-weight: 600; }
+
+    .ws-ref {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--ac); border: 1px solid var(--ac-border);
+      background: var(--ac-dim); padding: 1px 6px;
+      border-radius: var(--r-xs); cursor: pointer;
+    }
+
+    .sa-cursor {
+      display: inline-block; width: 1.5px; height: 11px;
+      background: var(--sa); margin-left: 1px;
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* SA input */
+    .sa-foot { flex-shrink: 0; padding: 10px 10px; border-top: 1px solid var(--bdd); }
+    .sa-input-box {
+      background: var(--bg-3); border: 1px solid var(--bd);
+      border-radius: var(--r-md); overflow: hidden; transition: border-color 0.15s;
+    }
+    .sa-input-box:focus-within { border-color: var(--sa); }
+
+    .sa-ta {
+      width: 100%; background: transparent; border: none; outline: none;
+      padding: 9px 11px; color: var(--t0); font-family: var(--font);
+      font-size: 12px; resize: none; min-height: 52px; max-height: 110px;
+      line-height: 1.55;
+    }
+    .sa-ta::placeholder { color: var(--t2); }
+
+    .sa-bar-row {
+      display: flex; align-items: center;
+      padding: 5px 10px; border-top: 1px solid var(--bdd);
+    }
+    .sa-hint { font-size: 10px; color: var(--t2); font-family: var(--mono); flex: 1; }
+    .sa-send {
+      display: flex; align-items: center; gap: 5px;
+      padding: 5px 11px; border-radius: var(--r-xs); border: none;
+      background: var(--sa); color: #fff; cursor: pointer;
+      font-family: var(--font); font-size: 11px; font-weight: 500;
+      transition: opacity 0.12s;
+    }
+    .sa-send:hover { opacity: 0.85; }
+    .sa-send svg { width: 11px; height: 11px; }
+
+    /* ══════════════════════════════════════════════════════
+       WORKSPACE SPLIT
+    ══════════════════════════════════════════════════════ */
+    .workspace-area { flex: 1; display: flex; overflow: hidden; }
+
+    /* ── CHAT PANEL ── */
+    .chat-panel {
+      width: 350px; min-width: 240px; flex-shrink: 0;
+      display: flex; flex-direction: column; background: var(--bg-2);
+    }
+
+    .chat-head {
+      height: 42px; padding: 0 14px;
+      display: flex; align-items: center;
+      border-bottom: 1px solid var(--bdd); flex-shrink: 0;
+    }
+    .model-sel {
+      display: flex; align-items: center; gap: 7px;
+      padding: 5px 10px; border-radius: var(--r-sm);
+      border: 1px solid var(--bd); background: var(--bg-3);
+      cursor: pointer; transition: all 0.12s;
+    }
+    .model-sel:hover { border-color: var(--bdh); background: var(--bg-4); }
+    .model-dot { width: 7px; height: 7px; border-radius: 50%; background: #3b82f6; flex-shrink: 0; }
+    .model-lbl { font-family: var(--mono); font-size: 11px; color: var(--t1); }
+    .model-lbl b { color: var(--t0); font-weight: 500; }
+    .model-caret { color: var(--t2); font-size: 9px; margin-left: 1px; }
+
+    .chat-msgs {
+      flex: 1; overflow-y: auto; padding: 14px 0 6px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .chat-msgs::-webkit-scrollbar { width: 2px; }
+    .chat-msgs::-webkit-scrollbar-thumb { background: var(--bd); }
+
+    /* messages — editorial style, no avatars */
+    .msg { padding: 6px 14px 8px; }
+    .msg.ai { border-left: 2px solid var(--ac-bar); margin-left: 12px; padding-left: 12px; }
+    .msg.user { background: var(--ac-dim); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+    .msg-lbl {
+      font-family: var(--mono); font-size: 9.5px; font-weight: 500;
+      text-transform: uppercase; letter-spacing: 0.09em;
+      color: var(--t2); margin-bottom: 4px;
+    }
+    .msg.ai .msg-lbl { color: var(--ac); opacity: 0.7; }
+    .msg-body { font-size: 12.5px; line-height: 1.65; color: var(--t0); }
+    .msg.user .msg-body { color: var(--t1); }
+    .msg-body strong { color: var(--t0); font-weight: 600; }
+
+    .inline-code {
+      font-family: var(--mono); font-size: 11px;
+      background: var(--bg-4); padding: 1px 5px;
+      border-radius: var(--r-xs); border: 1px solid var(--bd); color: var(--ac);
+    }
+    .preview-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--ac); border: 1px solid var(--ac-border);
+      background: var(--ac-dim); padding: 2px 7px;
+      border-radius: var(--r-xs); margin-top: 7px; cursor: pointer;
+      transition: background 0.12s;
+    }
+    .preview-chip:hover { background: rgba(16,185,129,0.14); }
+
+    .stream-cursor {
+      display: inline-block; width: 1.5px; height: 12px;
+      background: var(--ac); margin-left: 1px;
+      vertical-align: text-bottom; animation: blink 1s step-end infinite;
+    }
+
+    /* chat input */
+    .chat-foot { flex-shrink: 0; padding: 10px 12px; border-top: 1px solid var(--bdd); }
+    .input-box {
+      background: var(--bg-3); border: 1px solid var(--bd);
+      border-radius: var(--r-md); overflow: hidden; transition: border-color 0.15s;
+    }
+    .input-box:focus-within { border-color: var(--ac); }
+    .input-ta {
+      width: 100%; background: transparent; border: none; outline: none;
+      padding: 10px 12px; color: var(--t0); font-family: var(--font);
+      font-size: 12.5px; resize: none; min-height: 58px; max-height: 130px; line-height: 1.55;
+    }
+    .input-ta::placeholder { color: var(--t2); }
+    .input-bar {
+      display: flex; align-items: center;
+      padding: 5px 10px; border-top: 1px solid var(--bdd);
+    }
+    .input-hint { font-size: 10px; color: var(--t2); font-family: var(--mono); flex: 1; }
+    .send-btn {
+      display: flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: var(--r-xs); border: none;
+      background: var(--ac); color: #fff; cursor: pointer;
+      font-family: var(--font); font-size: 11px; font-weight: 500;
+      transition: opacity 0.12s;
+    }
+    .send-btn:hover { opacity: 0.85; }
+    .send-btn svg { width: 11px; height: 11px; }
+
+    /* panel divider */
+    .split { width: 1px; background: var(--bdd); flex-shrink: 0; cursor: col-resize; transition: background 0.15s; }
+    .split:hover { background: var(--ac); }
+
+    /* ── PREVIEW PANEL ── */
+    .preview-panel { flex: 1; display: flex; flex-direction: column; background: var(--bg-1); overflow: hidden; }
+    .preview-head {
+      height: 42px; padding: 0 16px;
+      display: flex; align-items: center; gap: 8px;
+      border-bottom: 1px solid var(--bdd); flex-shrink: 0;
+    }
+    .preview-icon { font-size: 13px; opacity: 0.6; }
+    .preview-name { font-family: var(--mono); font-size: 11px; color: var(--t1); }
+    .preview-tag {
+      font-family: var(--mono); font-size: 9.5px;
+      padding: 2px 6px; border-radius: var(--r-xs);
+      background: var(--ac-dim); color: var(--ac); border: 1px solid var(--ac-border);
+    }
+    .r-tabs { display: flex; gap: 2px; margin-left: auto; }
+    .r-tab {
+      padding: 3px 9px; border-radius: var(--r-xs); font-size: 10.5px;
+      color: var(--t2); cursor: pointer; font-family: var(--mono);
+      border: none; background: transparent; transition: all 0.12s;
+    }
+    .r-tab:hover { background: var(--bg-3); color: var(--t1); }
+    .r-tab.on { background: var(--bg-3); color: var(--t0); border: 1px solid var(--bd); }
+
+    .preview-body { flex: 1; overflow-y: auto; padding: 26px 28px; }
+    .preview-body::-webkit-scrollbar { width: 2px; }
+    .preview-body::-webkit-scrollbar-thumb { background: var(--bd); }
+
+    /* markdown */
+    .md-title { font-size: 17px; font-weight: 600; color: var(--t0); letter-spacing: -0.025em; line-height: 1.2; margin-bottom: 5px; }
+    .md-meta  { font-family: var(--mono); font-size: 10px; color: var(--t2); margin-bottom: 22px; }
+    .md-h2    { font-size: 10px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--t2); margin-bottom: 10px; }
+
+    .tbl-wrap { border-radius: var(--r-sm); border: 1px solid var(--bd); overflow: hidden; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    thead tr { background: var(--bg-3); border-bottom: 1px solid var(--bd); }
+    thead th { padding: 8px 13px; text-align: left; font-weight: 500; color: var(--t1); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; white-space: nowrap; }
+    tbody tr { border-bottom: 1px solid var(--bdd); transition: background 0.09s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--bg-3); }
+    tbody tr.hl { background: var(--ac-dim); }
+    tbody tr.hl:hover { background: rgba(16,185,129,0.12); }
+    tbody td { padding: 9px 13px; color: var(--t0); vertical-align: middle; }
+    tbody td:first-child { font-weight: 500; }
+    .n { font-family: var(--mono); font-size: 10.5px; color: var(--t1); }
+    .tag { display: inline-block; padding: 1px 6px; border-radius: var(--r-xs); font-size: 10px; font-family: var(--mono); }
+    .ty { background: var(--ac-dim); color: var(--ac); border: 1px solid var(--ac-border); }
+    .tn { background: var(--bg-4); color: var(--t2); border: 1px solid var(--bd); }
+    .tp { background: var(--yd); color: var(--yellow); border: 1px solid var(--yb); }
+    .tu { background: var(--ac-dim); color: var(--ac); border: 1px solid var(--ac-border); font-weight: 500; }
+
+    .callout { padding: 14px 16px; background: var(--ac-dim); border: 1px solid var(--ac-border); border-left: 2.5px solid var(--ac); border-radius: var(--r-sm); }
+    .callout-h { font-size: 9.5px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--ac); margin-bottom: 7px; }
+    .callout-b { font-size: 12px; color: var(--t1); line-height: 1.7; }
+    .callout-b strong { color: var(--t0); font-weight: 600; }
+
+    /* ── TAB BAR ── */
+    .tabbar {
+      height: 42px; background: var(--bg-0); border-top: 1px solid var(--bdd);
+      display: flex; align-items: stretch; flex-shrink: 0; padding: 0 6px; gap: 1px;
+    }
+    .ws-tab {
+      display: flex; align-items: center; gap: 6px; padding: 0 14px;
+      cursor: pointer; font-size: 12px; font-weight: 400; color: var(--t2);
+      border: none; background: transparent; font-family: var(--font);
+      transition: color 0.12s; white-space: nowrap; position: relative;
+    }
+    .ws-tab::after {
+      content: ''; position: absolute; bottom: 0; left: 14px; right: 14px;
+      height: 2px; background: transparent; transition: background 0.12s; border-radius: 2px 2px 0 0;
+    }
+    .ws-tab:hover { color: var(--t1); }
+    .ws-tab.on { color: var(--t0); }
+    .ws-tab.on::after { background: var(--ac); }
+    .tab-icon { font-size: 11px; }
+    .tab-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ac); animation: pulse-dot 2.6s ease-in-out infinite; }
+    .tab-new {
+      display: flex; align-items: center; gap: 4px; padding: 0 10px;
+      color: var(--t2); cursor: pointer; font-size: 11px;
+      background: transparent; border: none; font-family: var(--font);
+      transition: color 0.12s; margin-left: 4px;
+    }
+    .tab-new:hover { color: var(--ac); }
+
+    /* ══════════════════════════════════════════════════════
+       OVERLAYS
+    ══════════════════════════════════════════════════════ */
+    .overlay {
+      position: fixed; inset: 0;
+      background: rgba(8,7,6,0.72); backdrop-filter: blur(6px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100; opacity: 0; pointer-events: none; transition: opacity 0.18s;
+    }
+    [data-theme="light"] .overlay { background: rgba(20,18,14,0.55); }
+    .overlay.open { opacity: 1; pointer-events: all; }
+
+    .sheet {
+      background: var(--bg-2); border: 1px solid var(--bd); border-radius: var(--r-lg);
+      overflow: hidden;
+      box-shadow: 0 28px 80px var(--shl), 0 0 0 1px rgba(255,255,255,0.04);
+      transform: scale(0.96) translateY(10px);
+      transition: transform 0.22s cubic-bezier(0.33,1.52,0.64,1);
+    }
+    .overlay.open .sheet { transform: scale(1) translateY(0); }
+    [data-theme="light"] .sheet { box-shadow: 0 24px 60px var(--shl); }
+
+    .sheet-head { padding: 16px 20px; border-bottom: 1px solid var(--bdd); display: flex; align-items: center; justify-content: space-between; }
+    .sheet-title { font-size: 13.5px; font-weight: 600; color: var(--t0); }
+    .sheet-sub { font-size: 10px; color: var(--t2); font-family: var(--mono); margin-top: 2px; }
+    .x-btn {
+      width: 26px; height: 26px; border-radius: var(--r-sm); border: none;
+      background: var(--bg-4); color: var(--t1); cursor: pointer; font-size: 16px;
+      display: flex; align-items: center; justify-content: center; transition: all 0.12s;
+    }
+    .x-btn:hover { background: var(--bg-5); color: var(--t0); }
+    .sheet-foot { padding: 12px 20px; border-top: 1px solid var(--bdd); display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+    .btn-ghost { padding: 6px 13px; border-radius: var(--r-sm); border: 1px solid var(--bd); background: transparent; color: var(--t1); cursor: pointer; font-family: var(--font); font-size: 12px; transition: all 0.12s; }
+    .btn-ghost:hover { border-color: var(--bdh); color: var(--t0); }
+    .btn-solid { padding: 6px 15px; border-radius: var(--r-sm); border: none; background: var(--ac); color: #fff; cursor: pointer; font-family: var(--font); font-size: 12px; font-weight: 500; transition: opacity 0.12s; }
+    .btn-solid:hover { opacity: 0.85; }
+
+    /* Settings modal */
+    .settings-body { display: flex; height: 460px; }
+    .s-nav { width: 154px; background: var(--bg-1); border-right: 1px solid var(--bdd); padding: 10px 8px; flex-shrink: 0; }
+    .s-item { display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: var(--r-sm); cursor: pointer; font-size: 12px; color: var(--t2); border: 1px solid transparent; background: transparent; width: 100%; text-align: left; font-family: var(--font); transition: all 0.1s; }
+    .s-item:hover { background: var(--bg-3); color: var(--t1); }
+    .s-item.on { background: var(--ac-dim); color: var(--ac); border-color: var(--ac-border); }
+    .s-item svg { width: 13px; height: 13px; flex-shrink: 0; }
+    .s-content { flex: 1; padding: 18px 20px; overflow-y: auto; }
+    .s-content::-webkit-scrollbar { width: 2px; }
+    .s-content::-webkit-scrollbar-thumb { background: var(--bd); }
+    .s-label { font-size: 11px; font-weight: 600; color: var(--t0); margin-bottom: 2px; }
+    .s-sub { font-size: 10px; color: var(--t2); font-family: var(--mono); margin-bottom: 14px; }
+
+    .pcard { display: flex; align-items: center; gap: 11px; padding: 11px 13px; background: var(--bg-3); border: 1px solid var(--bd); border-radius: var(--r-sm); margin-bottom: 7px; cursor: pointer; transition: border-color 0.12s; }
+    .pcard:hover { border-color: var(--bdh); }
+    .pcard.live { border-color: var(--ac-border); }
+    .pcard-ic { width: 32px; height: 32px; border-radius: 7px; background: var(--bg-5); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+    .pcard-info { flex: 1; }
+    .pcard-name { font-size: 12px; font-weight: 500; color: var(--t0); margin-bottom: 2px; }
+    .pcard-status { font-size: 10px; font-family: var(--mono); color: var(--t2); }
+    .pcard-status.ok { color: var(--ac); }
+    .p0 { font-size: 9px; font-family: var(--mono); padding: 2px 6px; border-radius: var(--r-xs); }
+    .p0.live    { background: var(--ac-dim); color: var(--ac); border: 1px solid var(--ac-border); }
+    .p0.offline { background: var(--bg-5); color: var(--t2); border: 1px solid var(--bd); }
+
+    .add-form { margin-top: 14px; padding: 14px; background: var(--bg-3); border: 1px solid var(--bd); border-radius: var(--r-sm); }
+    .form-section { font-size: 10px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.09em; color: var(--t1); margin-bottom: 13px; }
+    .fg { margin-bottom: 12px; }
+    .fl { display: block; font-size: 10.5px; font-weight: 500; color: var(--t1); text-transform: uppercase; letter-spacing: 0.07em; font-family: var(--mono); margin-bottom: 5px; }
+    .prov-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; }
+    .p-opt { padding: 9px 7px; border-radius: var(--r-sm); border: 1px solid var(--bd); background: var(--bg-4); cursor: pointer; text-align: center; transition: all 0.12s; }
+    .p-opt:hover { border-color: var(--bdh); }
+    .p-opt.on { border-color: var(--ac); background: var(--ac-dim); }
+    .p-opt-ic { font-size: 17px; margin-bottom: 4px; }
+    .p-opt-name { font-size: 10px; font-family: var(--mono); color: var(--t1); }
+    .p-opt.on .p-opt-name { color: var(--ac); }
+    .fi { width: 100%; background: var(--bg-4); border: 1px solid var(--bd); border-radius: var(--r-sm); padding: 8px 11px; color: var(--t0); font-family: var(--mono); font-size: 11.5px; outline: none; transition: border-color 0.12s; }
+    .fi:focus { border-color: var(--ac); }
+    .fi::placeholder { color: var(--t2); }
+    .fi-hint { margin-top: 3px; font-size: 10px; color: var(--t2); font-family: var(--mono); }
+    .key-row { position: relative; }
+    .key-row .fi { padding-right: 90px; }
+    .val-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 10px; font-family: var(--mono); padding: 3px 8px; border-radius: var(--r-xs); border: 1px solid var(--ac-border); background: var(--ac-dim); color: var(--ac); cursor: pointer; transition: all 0.12s; }
+    .val-btn:hover { background: rgba(16,185,129,0.15); }
+    .val-btn.checking { color: var(--yellow); border-color: var(--yb); background: var(--yd); }
+    .val-ok { display: none; margin-top: 5px; font-size: 10.5px; font-family: var(--mono); color: var(--ac); align-items: center; gap: 4px; }
+    .val-ok.show { display: flex; }
+
+    /* Command palette */
+    .cmd-overlay { position: fixed; inset: 0; background: rgba(8,7,6,0.6); backdrop-filter: blur(3px); display: flex; align-items: flex-start; justify-content: center; padding-top: 13vh; z-index: 200; opacity: 0; pointer-events: none; transition: opacity 0.14s; }
+    [data-theme="light"] .cmd-overlay { background: rgba(20,18,14,0.45); }
+    .cmd-overlay.open { opacity: 1; pointer-events: all; }
+    .cmd-sheet { width: 510px; background: var(--bg-2); border: 1px solid var(--bdh); border-radius: var(--r-lg); overflow: hidden; box-shadow: 0 36px 100px var(--shl); transform: translateY(-10px); transition: transform 0.18s cubic-bezier(0.33,1.52,0.64,1); }
+    .cmd-overlay.open .cmd-sheet { transform: translateY(0); }
+    .cmd-row { display: flex; align-items: center; gap: 9px; padding: 12px 14px; border-bottom: 1px solid var(--bdd); }
+    .cmd-icon { color: var(--ac); font-size: 13px; }
+    .cmd-input { flex: 1; background: transparent; border: none; outline: none; color: var(--t0); font-family: var(--font); font-size: 13px; }
+    .cmd-input::placeholder { color: var(--t2); }
+    .cmd-results { padding: 6px; }
+    .cmd-group { font-size: 9.5px; font-family: var(--mono); color: var(--t2); text-transform: uppercase; letter-spacing: 0.1em; padding: 6px 10px 3px; }
+    .cmd-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer; transition: background 0.08s; }
+    .cmd-item:hover, .cmd-item.hi { background: var(--bg-3); }
+    .cmd-ic { width: 28px; height: 28px; border-radius: var(--r-xs); background: var(--bg-3); border: 1px solid var(--bd); display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+    .cmd-txt { flex: 1; }
+    .cmd-name { font-size: 12px; color: var(--t0); }
+    .cmd-desc { font-size: 10px; color: var(--t2); font-family: var(--mono); }
+    .cmd-kbd { font-family: var(--mono); font-size: 10px; color: var(--t2); background: var(--bg-4); padding: 2px 5px; border-radius: var(--r-xs); border: 1px solid var(--bd); }
+  </style>
+</head>
+
+<body>
+<div class="app">
+
+  <!-- ════ TITLEBAR ════ -->
+  <div class="titlebar">
+    <div class="wordmark">
+      <div class="wm-mark">
+        <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <line x1="2" y1="5" x2="8" y2="5"/><line x1="5" y1="2" x2="5" y2="8"/>
+        </svg>
+      </div>
+      <span class="wm-text">mind<em>eck</em></span>
+    </div>
+    <div class="tb-sep"></div>
+    <div class="tb-spacer"></div>
+    <div class="tb-right">
+      <button class="cmd-k" onclick="openCmd()"><kbd>⌘K</kbd><span>Search</span></button>
+      <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
+      <button class="icon-btn" onclick="openSettings()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z"/>
+          <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ════ BODY ════ -->
+  <div class="body">
+
+    <!-- ════════════════════════════════════════════════
+         SUPER AGENT — permanent left panel
+    ════════════════════════════════════════════════ -->
+    <div class="sa-panel">
+
+      <!-- Header -->
+      <div class="sa-head">
+        <div class="sa-icon">✦</div>
+        <span class="sa-title">Super Agent</span>
+        <span class="sa-global">global</span>
+      </div>
+
+      <!-- Workspace status (compact) -->
+      <div class="sa-ws-section">
+        <div class="sa-ws-label">Workspaces</div>
+
+        <button class="sa-ws-item on" onclick="switchWs(this)">
+          <div class="sa-ws-dot active"></div>
+          <div class="sa-ws-info">
+            <div class="sa-ws-name">Competitor Research</div>
+            <div class="sa-ws-snip">"LobeChat is closest…"</div>
+          </div>
+          <span class="sa-ws-badge active">active</span>
+        </button>
+
+        <button class="sa-ws-item" onclick="switchWs(this)">
+          <div class="sa-ws-dot pending"></div>
+          <div class="sa-ws-info">
+            <div class="sa-ws-name">Project Dev</div>
+            <div class="sa-ws-snip">demo stuck on auth flow</div>
+          </div>
+          <span class="sa-ws-badge pending">pending</span>
+        </button>
+
+        <button class="sa-ws-item" onclick="switchWs(this)">
+          <div class="sa-ws-dot idle"></div>
+          <div class="sa-ws-info">
+            <div class="sa-ws-name">3D Printing</div>
+            <div class="sa-ws-snip">waiting on layer params</div>
+          </div>
+          <span class="sa-ws-badge idle">idle</span>
+        </button>
+      </div>
+
+      <!-- Chat -->
+      <div class="sa-messages" id="saMessages">
+
+        <div class="sa-msg ai">
+          <div class="sa-msg-lbl">Super Agent</div>
+          <div class="sa-msg-body">
+            Good to see you. Here's where things stand:
+            <br><br>
+            <strong>Research</strong> is near done — gap analysis is clear. <strong>Dev</strong> is blocked on the auth demo. <strong>3D</strong> needs your layer height input.
+            <br><br>
+            What do you want to tackle?
+          </div>
+        </div>
+
+        <div class="sa-msg user">
+          <div class="sa-msg-lbl">You</div>
+          <div class="sa-msg-body">
+            What was the key conclusion from the competitor research?
+          </div>
+        </div>
+
+        <div class="sa-msg ai">
+          <div class="sa-msg-lbl">Super Agent</div>
+          <div class="sa-msg-body">
+            From <span class="ws-ref">🔬 Competitor Research</span>, the core finding: no existing tool combines BYOK + multi-workspace + local-first data + agent workflow.
+            <br><br>
+            <strong>LobeChat</strong> is closest but has no persistent workspace state. That intersection is currently unoccupied<span class="sa-cursor"></span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Input -->
+      <div class="sa-foot">
+        <div class="sa-input-box">
+          <textarea class="sa-ta" placeholder="Ask anything, across all workspaces…"></textarea>
+          <div class="sa-bar-row">
+            <span class="sa-hint">always available</span>
+            <button class="sa-send">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <line x1="22" y1="2" x2="11" y2="13"/>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+              Ask
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /sa-panel -->
+
+    <!-- ════════════════════════════════════════════════
+         WORKSPACE AREA (chat + preview)
+    ════════════════════════════════════════════════ -->
+    <div class="workspace-area">
+
+      <!-- Chat Panel -->
+      <div class="chat-panel">
+        <div class="chat-head">
+          <div class="model-sel">
+            <div class="model-dot"></div>
+            <span class="model-lbl"><b>DeepSeek</b> · deepseek-chat</span>
+            <span class="model-caret">▾</span>
+          </div>
+        </div>
+
+        <div class="chat-msgs">
+          <div class="msg user">
+            <div class="msg-lbl">You</div>
+            <div class="msg-body">
+              Analyze the key competitors in the AI desktop client space. Structured comparison — BYOK, multi-workspace, local data persistence.
+            </div>
+          </div>
+
+          <div class="msg ai">
+            <div class="msg-lbl">DeepSeek · deepseek-chat</div>
+            <div class="msg-body">
+              Analyzed 5 major products. Full table is in the preview panel →
+              <br><br>
+              Key finding: <strong>no existing tool</strong> combines BYOK + multi-workspace + local-first. Open WebUI leads in adoption (126k stars) but chat-only. Dify has workflows but is web-only.
+              <br><br>
+              <span class="preview-chip">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                competitor-analysis.md · opened in preview
+              </span>
+            </div>
+          </div>
+
+          <div class="msg user">
+            <div class="msg-lbl">You</div>
+            <div class="msg-body">Which is the most likely direct competitor at launch?</div>
+          </div>
+
+          <div class="msg ai">
+            <div class="msg-lbl">DeepSeek · deepseek-chat</div>
+            <div class="msg-body">
+              <strong>LobeChat</strong> — similar aesthetic target, developer audience, strong BYOK story. Their gap is no persistent workspace state; that's ownable.
+              <br><br>
+              Longer-term risk: if <span class="inline-code">Open WebUI</span> ships workspace management<span class="stream-cursor"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-foot">
+          <div class="input-box">
+            <textarea class="input-ta" placeholder="Ask anything about this workspace…"></textarea>
+            <div class="input-bar">
+              <span class="input-hint">↵ send · ⇧↵ newline</span>
+              <button class="send-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <line x1="22" y1="2" x2="11" y2="13"/>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Split -->
+      <div class="split"></div>
+
+      <!-- Preview Panel -->
+      <div class="preview-panel">
+        <div class="preview-head">
+          <span class="preview-icon">📄</span>
+          <span class="preview-name">competitor-analysis.md</span>
+          <span class="preview-tag">markdown</span>
+          <div class="r-tabs">
+            <button class="r-tab on">md</button>
+            <button class="r-tab">raw</button>
+            <button class="r-tab">export</button>
+          </div>
+        </div>
+        <div class="preview-body">
+          <div class="md-title">AI Desktop Client — Competitor Analysis</div>
+          <div class="md-meta">2026-03-06 · 5 products · deepseek-chat · Competitor Research</div>
+          <div class="md-h2">Feature Matrix</div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Product</th><th>Stars</th><th>BYOK</th>
+                  <th>Multi-WS</th><th>Local Data</th><th>Agent WF</th><th>OSS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>Open WebUI</td><td><span class="n">126k ★</span></td><td><span class="tag ty">yes</span></td><td><span class="tag tn">no</span></td><td><span class="tag tp">partial</span></td><td><span class="tag tn">no</span></td><td><span class="tag ty">yes</span></td></tr>
+                <tr><td>LobeChat</td><td><span class="n">60k ★</span></td><td><span class="tag ty">yes</span></td><td><span class="tag tn">no</span></td><td><span class="tag tn">no</span></td><td><span class="tag tn">no</span></td><td><span class="tag ty">yes</span></td></tr>
+                <tr><td>Dify</td><td><span class="n">90k ★</span></td><td><span class="tag ty">yes</span></td><td><span class="tag tp">partial</span></td><td><span class="tag tn">no</span></td><td><span class="tag ty">yes</span></td><td><span class="tag ty">yes</span></td></tr>
+                <tr><td>Coze</td><td><span class="n">—</span></td><td><span class="tag tp">limited</span></td><td><span class="tag tp">partial</span></td><td><span class="tag tn">no</span></td><td><span class="tag ty">yes</span></td><td><span class="tag tn">no</span></td></tr>
+                <tr><td>NextChat</td><td><span class="n">75k ★</span></td><td><span class="tag ty">yes</span></td><td><span class="tag tn">no</span></td><td><span class="tag tn">no</span></td><td><span class="tag tn">no</span></td><td><span class="tag ty">yes</span></td></tr>
+                <tr class="hl"><td style="color:var(--ac);font-weight:600;">Mindeck ✦</td><td><span class="n" style="color:var(--t2);">—</span></td><td><span class="tag tu">yes</span></td><td><span class="tag tu">yes</span></td><td><span class="tag tu">yes</span></td><td><span class="tag tu">yes</span></td><td><span class="tag tu">yes</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout">
+            <div class="callout-h">Strategic Gap</div>
+            <div class="callout-b">No existing product occupies the intersection of <strong>BYOK + multi-workspace + local-first + agent workflow</strong>. Mindeck's Super Agent has no comparable analog. The restricted-region market (CN/VN/IR) is structurally underserved.</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /workspace-area -->
+  </div><!-- /body -->
+
+  <!-- ════ TAB BAR ════ -->
+  <div class="tabbar">
+    <button class="ws-tab on" onclick="switchTab(this)">
+      <span class="tab-icon">🔬</span><span>Competitor Research</span>
+      <div class="tab-dot"></div>
+    </button>
+    <button class="ws-tab" onclick="switchTab(this)">
+      <span class="tab-icon" style="font-family:var(--mono);font-size:9px;">&lt;/&gt;</span>
+      <span>Project Dev</span>
+    </button>
+    <button class="ws-tab" onclick="switchTab(this)">
+      <span class="tab-icon">🖨</span><span>3D Printing</span>
+    </button>
+    <button class="tab-new">+ New workspace</button>
+  </div>
+
+</div><!-- /app -->
+
+
+<!-- ════ SETTINGS ════ -->
+<div class="overlay" id="settingsOv" onclick="if(event.target===this)closeSettings()">
+  <div class="sheet" style="width:580px;">
+    <div class="sheet-head">
+      <div><div class="sheet-title">Provider Settings</div><div class="sheet-sub">mindeck · keys stored in OS Keychain · never on disk</div></div>
+      <button class="x-btn" onclick="closeSettings()">×</button>
+    </div>
+    <div class="settings-body">
+      <div class="s-nav">
+        <button class="s-item on">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>Providers</button>
+        <button class="s-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="7" r="4"/><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/></svg>General</button>
+        <button class="s-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>Appearance</button>
+        <button class="s-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>Storage</button>
+        <button class="s-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Shortcuts</button>
+      </div>
+      <div class="s-content">
+        <div class="s-label">API Providers</div>
+        <div class="s-sub">Manage model connections. Keys are stored securely in OS Keychain.</div>
+        <div class="pcard live"><div class="pcard-ic">🐙</div><div class="pcard-info"><div class="pcard-name">Ollama (Local)</div><div class="pcard-status ok">● connected · llama3.2 · qwen2.5 · deepseek-r1:7b</div></div><span class="p0 live">P0</span></div>
+        <div class="pcard live"><div class="pcard-ic">⚡</div><div class="pcard-info"><div class="pcard-name">DeepSeek</div><div class="pcard-status ok">● connected · deepseek-chat · deepseek-r1</div></div><span class="p0 live">P0</span></div>
+        <div class="pcard"><div class="pcard-ic">🌐</div><div class="pcard-info"><div class="pcard-name">OpenAI Compatible</div><div class="pcard-status">○ not configured · SiliconFlow, Yi, GLM…</div></div><span class="p0 offline">P0</span></div>
+        <div class="add-form">
+          <div class="form-section">Add Provider</div>
+          <div class="fg"><label class="fl">Provider Type</label>
+            <div class="prov-grid">
+              <div class="p-opt" onclick="selProv(this,'https://api.deepseek.com/v1')"><div class="p-opt-ic">⚡</div><div class="p-opt-name">DeepSeek</div></div>
+              <div class="p-opt on" onclick="selProv(this,'https://dashscope.aliyuncs.com/compatible-mode/v1')"><div class="p-opt-ic">🔮</div><div class="p-opt-name">Qwen / 通义</div></div>
+              <div class="p-opt" onclick="selProv(this,'https://api.openai.com/v1')"><div class="p-opt-ic">🌐</div><div class="p-opt-name">OpenAI Compat</div></div>
+            </div>
+          </div>
+          <div class="fg"><label class="fl">Base URL</label><input id="baseUrl" class="fi" type="text" value="https://dashscope.aliyuncs.com/compatible-mode/v1"/><div class="fi-hint">Qwen default · OpenAI-compatible endpoint</div></div>
+          <div class="fg"><label class="fl">API Key</label>
+            <div class="key-row"><input class="fi" type="password" value="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"/><button class="val-btn" id="valBtn" onclick="runValidate()">Validate</button></div>
+            <div class="val-ok" id="valOk">✓ Connected · qwen-turbo · qwen-plus · qwen-max available</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="sheet-foot"><button class="btn-ghost" onclick="closeSettings()">Cancel</button><button class="btn-solid">Save Provider</button></div>
+  </div>
+</div>
+
+
+<!-- ════ CMD PALETTE ════ -->
+<div class="cmd-overlay" id="cmdOv" onclick="if(event.target===this)closeCmd()">
+  <div class="cmd-sheet">
+    <div class="cmd-row">
+      <span class="cmd-icon">⌘</span>
+      <input class="cmd-input" id="cmdInput" type="text" placeholder="Search workspaces, conversations, commands…"/>
+    </div>
+    <div class="cmd-results">
+      <div class="cmd-group">Workspaces</div>
+      <div class="cmd-item hi"><div class="cmd-ic">🔬</div><div class="cmd-txt"><div class="cmd-name">Competitor Research</div><div class="cmd-desc">active · last message 2 min ago</div></div><span class="cmd-kbd">↵</span></div>
+      <div class="cmd-item"><div class="cmd-ic" style="font-family:var(--mono);font-size:9px;color:var(--t2);">&lt;/&gt;</div><div class="cmd-txt"><div class="cmd-name">Project Dev</div><div class="cmd-desc">pending · demo paused</div></div></div>
+      <div class="cmd-item"><div class="cmd-ic">🖨</div><div class="cmd-txt"><div class="cmd-name">3D Printing</div><div class="cmd-desc">idle · parameter tuning</div></div></div>
+      <div class="cmd-group" style="margin-top:6px;">Commands</div>
+      <div class="cmd-item"><div class="cmd-ic" style="font-size:17px;color:var(--t2);">+</div><div class="cmd-txt"><div class="cmd-name">New Workspace</div><div class="cmd-desc">Create a fresh workspace thread</div></div><span class="cmd-kbd">⌘N</span></div>
+      <div class="cmd-item"><div class="cmd-ic" style="font-size:13px;color:var(--t2);">⚙</div><div class="cmd-txt"><div class="cmd-name">Provider Settings</div><div class="cmd-desc">Manage API keys and models</div></div><span class="cmd-kbd">⌘,</span></div>
+    </div>
+  </div>
+</div>
+
+
+<script>
+  const root = document.documentElement;
+
+  function toggleTheme() {
+    const isDark = root.dataset.theme === 'dark';
+    root.dataset.theme = isDark ? 'light' : 'dark';
+    document.getElementById('themeBtn').textContent = isDark ? '🌙' : '☀️';
+  }
+
+  function openSettings()  { document.getElementById('settingsOv').classList.add('open'); }
+  function closeSettings() { document.getElementById('settingsOv').classList.remove('open'); }
+  function openCmd()  { document.getElementById('cmdOv').classList.add('open'); setTimeout(() => document.getElementById('cmdInput').focus(), 40); }
+  function closeCmd() { document.getElementById('cmdOv').classList.remove('open'); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { closeSettings(); closeCmd(); }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); openCmd(); }
+    if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); openSettings(); }
+  });
+
+  function selProv(el, url) {
+    document.querySelectorAll('.p-opt').forEach(o => o.classList.remove('on'));
+    el.classList.add('on');
+    document.getElementById('baseUrl').value = url;
+    document.getElementById('valBtn').textContent = 'Validate';
+    document.getElementById('valBtn').className = 'val-btn';
+    document.getElementById('valOk').classList.remove('show');
+  }
+
+  function runValidate() {
+    const btn = document.getElementById('valBtn'), ok = document.getElementById('valOk');
+    btn.textContent = 'Checking…'; btn.className = 'val-btn checking'; ok.classList.remove('show');
+    setTimeout(() => { btn.textContent = '✓ Valid'; btn.className = 'val-btn'; ok.classList.add('show'); }, 1500);
+  }
+
+  function switchTab(el) { document.querySelectorAll('.ws-tab').forEach(t => t.classList.remove('on')); el.classList.add('on'); }
+  function switchWs(el)  { document.querySelectorAll('.sa-ws-item').forEach(t => t.classList.remove('on')); el.classList.add('on'); }
+
+  document.querySelectorAll('.s-item').forEach(item => {
+    item.addEventListener('click', () => { document.querySelectorAll('.s-item').forEach(i => i.classList.remove('on')); item.classList.add('on'); });
+  });
+  document.querySelectorAll('.r-tab').forEach(tab => {
+    tab.addEventListener('click', () => { document.querySelectorAll('.r-tab').forEach(t => t.classList.remove('on')); tab.classList.add('on'); });
+  });
+</script>
+
+</body>
+</html>
