@@ -32,6 +32,13 @@ pub fn run() {
             commands::stream::probe_provider,
             commands::stream::probe_url,
             commands::stream::list_provider_models,
+            // files
+            commands::files::list_dir,
+            commands::files::rename_path,
+            commands::files::create_file,
+            commands::files::create_dir_at,
+            commands::files::delete_path,
+            commands::files::pick_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

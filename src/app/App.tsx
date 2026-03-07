@@ -6,12 +6,12 @@ import { useProviderStore } from "@/stores/provider"
 import { initAppDirs } from "@/services/providers/storage"
 import { listWorkspaces, createWorkspace, newWorkspace } from "@/services/workspace"
 import { listProviders } from "@/services/providers/storage"
-import { SuperAgentPanel } from "@/components/super-agent/SuperAgentPanel"
+import { MajordomoPanel } from "@/components/majordomo/MajordomoPanel"
 import { ChatPanel } from "@/components/chat/ChatPanel"
 import { PreviewPanel } from "@/components/preview/PreviewPanel"
-import { WorkspaceTabBar } from "@/components/workspace/WorkspaceTabBar"
+import { WorkspacePanel } from "@/components/workspace/WorkspacePanel"
 import { ProviderSettings } from "@/components/provider/ProviderSettings"
-import { CommandPalette } from "@/components/super-agent/CommandPalette"
+import { CommandPalette } from "@/components/majordomo/CommandPalette"
 import type { RenderableContent } from "@/types"
 
 export default function App() {
@@ -128,8 +128,8 @@ export default function App() {
 
       {/* ── MAIN BODY: 3-column layout ── */}
       <div className="body">
-        {/* Column 1: Super Agent (permanent) */}
-        <SuperAgentPanel />
+        {/* Column 1: Majordomo (permanent) */}
+        <MajordomoPanel />
 
         {/* Column 2+3: Workspace area */}
         <div className="workspace-area">
@@ -141,6 +141,8 @@ export default function App() {
               />
               <div className="split" />
               <PreviewPanel content={previewContent} />
+              <div className="split" />
+              <WorkspacePanel workspace={activeWorkspace} />
             </>
           ) : (
             <div className="workspace-empty">
@@ -149,9 +151,6 @@ export default function App() {
           )}
         </div>
       </div>
-
-      {/* ── TAB BAR ── */}
-      <WorkspaceTabBar workspaces={workspaces} activeId={activeWorkspaceId} />
 
       {/* ── OVERLAYS ── */}
       <ProviderSettings />

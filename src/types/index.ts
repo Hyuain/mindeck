@@ -28,6 +28,8 @@ export type HealthStatus =
 
 export type WorkspaceStatus = "active" | "pending" | "idle"
 
+export type WorkspaceType = "internal" | "linked"
+
 export interface AgentConfig {
   providerId: string
   modelId: string
@@ -47,6 +49,7 @@ export interface Workspace {
   updatedAt: string
   agentConfig: AgentConfig
   layout: WorkspaceLayout
+  workspaceType?: WorkspaceType
   repoPath?: string
   /** Short status summary for Super Agent (≤200 tokens) */
   stateSummary?: string
@@ -54,8 +57,14 @@ export interface Workspace {
   lastActivity?: string
 }
 
-// ─── Conversation / Messages ──────────────────────────────────
+export interface FileNode {
+  path: string
+  name: string
+  isDir: boolean
+  size?: number
+}
 
+// ─── Conversation / Messages ──────────────────────────────────
 export type MessageRole = "user" | "assistant" | "system"
 
 export interface Message {
