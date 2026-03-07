@@ -11,12 +11,7 @@ export function WorkspacePanel({ workspace }: WorkspacePanelProps) {
   const [contentRoot, setContentRoot] = useState<string | null>(null)
 
   useEffect(() => {
-    if (workspace.workspaceType === "linked" && workspace.repoPath) {
-      setContentRoot(workspace.repoPath)
-      return
-    }
-    // For internal workspaces, resolve via Tauri path API
-    resolveInternalRoot(workspace.id).then(setContentRoot).catch(console.error)
+    resolveContentRoot(workspace).then(setContentRoot).catch(console.error)
   }, [workspace.id, workspace.workspaceType, workspace.repoPath])
 
   return (
@@ -36,13 +31,25 @@ export function WorkspacePanel({ workspace }: WorkspacePanelProps) {
   )
 }
 
-async function resolveInternalRoot(workspaceId: string): Promise<string> {
+/**
+ * Resolve the "project content root" for a workspace.
+ *
+ * - linked workspace: the imported folder path (repoPath)
+ * - internal workspace: ~/.mindeck/workspaces/<id>/files/
+ *
+ * This is what the Files panel shows — NOT the workspace storage directory
+ * (conversations/, knowledge/, etc. are hidden from the user).
+ */
+export async function resolveContentRoot(workspace: Workspace): Promise<string> {
+  if (workspace.workspaceType === "linked" && workspace.repoPath) {
+    return workspace.repoPath
+  }
   try {
     const { homeDir } = await import("@tauri-apps/api/path")
     const home = await homeDir()
-    return `${home}/.mindeck/workspaces/${workspaceId}`
+    return `${home}/.mindeck/workspaces/${workspace.id}/files`
   } catch {
     // Browser/dev mode fallback
-    return `~/.mindeck/workspaces/${workspaceId}`
+    return `~/.mindeck/workspaces/${workspace.id}/files`
   }
 }

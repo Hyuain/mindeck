@@ -3,9 +3,14 @@ import { Settings } from "lucide-react"
 import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useProviderStore } from "@/stores/provider"
+import { useSkillsStore } from "@/stores/skills"
+import { useMajordomoStore, initMajordomoResultListener } from "@/stores/majordomo"
 import { initAppDirs } from "@/services/providers/storage"
 import { listWorkspaces, createWorkspace, newWorkspace } from "@/services/workspace"
 import { listProviders } from "@/services/providers/storage"
+import { listSkills } from "@/services/skills"
+import { registerBuiltins } from "@/services/tools/builtins"
+import { loadMajordomoMessages } from "@/services/conversation"
 import { MajordomoPanel } from "@/components/majordomo/MajordomoPanel"
 import { ChatPanel } from "@/components/chat/ChatPanel"
 import { PreviewPanel } from "@/components/preview/PreviewPanel"
@@ -24,6 +29,8 @@ export default function App() {
     addWorkspace,
   } = useWorkspaceStore()
   const { setProviders } = useProviderStore()
+  const { setSkills } = useSkillsStore()
+  const { setMessages: setMajordomoMessages } = useMajordomoStore()
 
   // Preview content keyed by workspace id
   const [previewMap, setPreviewMap] = useState<Record<string, RenderableContent>>({})
@@ -37,6 +44,12 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
 
+    // Register built-in tools once
+    registerBuiltins()
+
+    // Wire up Majordomo ← workspace result notifications
+    const unsubscribeResults = initMajordomoResultListener()
+
     async function bootstrap() {
       try {
         await initAppDirs()
@@ -44,9 +57,16 @@ export default function App() {
         // browser mode: skip
       }
       try {
-        const [wsList, provList] = await Promise.all([listWorkspaces(), listProviders()])
+        const [wsList, provList, skillsList, majordomoMsgs] = await Promise.all([
+          listWorkspaces(),
+          listProviders(),
+          listSkills().catch(() => []),
+          loadMajordomoMessages().catch(() => []),
+        ])
         setWorkspaces(wsList)
         setProviders(provList)
+        setSkills(skillsList)
+        setMajordomoMessages(majordomoMsgs)
 
         if (wsList.length > 0) {
           setActiveWorkspace(wsList[0].id)
@@ -63,6 +83,10 @@ export default function App() {
     }
 
     bootstrap()
+
+    return () => {
+      unsubscribeResults()
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Global keyboard shortcuts

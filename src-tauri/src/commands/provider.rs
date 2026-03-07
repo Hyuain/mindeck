@@ -94,7 +94,7 @@ pub fn delete_provider(id: String) -> Result<(), AppError> {
 pub fn init_app_dirs() -> Result<(), AppError> {
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("Cannot resolve home dir".into()))?;
     let root = home.join(".mindeck");
-    for subdir in &["providers", "workspaces", "super-agent/conversations", "cache"] {
+    for subdir in &["providers", "workspaces", "skills", "super-agent/conversations", "cache"] {
         fs::create_dir_all(root.join(subdir))?;
     }
     Ok(())

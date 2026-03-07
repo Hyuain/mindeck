@@ -34,6 +34,10 @@ export interface AgentConfig {
   providerId: string
   modelId: string
   systemPrompt?: string
+  /** Whether to run the full agentic loop (tools, multi-turn) vs simple chat */
+  enableAgentLoop?: boolean
+  /** Allowed tool names; undefined = all tools */
+  tools?: string[]
 }
 
 export interface WorkspaceLayout {
@@ -67,6 +71,21 @@ export interface FileNode {
 // ─── Conversation / Messages ──────────────────────────────────
 export type MessageRole = "user" | "assistant" | "system"
 
+/** Who initiated this message */
+export type MessageSource = "user" | "majordomo" | "sub-agent" | "system"
+
+export interface MessageMetadata {
+  /** Who sent this message */
+  source?: MessageSource
+  /** Correlation ID linking to a TaskDispatchEvent */
+  dispatchId?: string
+  /** Sub-agent identifier (if source is "sub-agent") */
+  agentId?: string
+  /** dispatchId of the task this is a reply to */
+  replyTo?: string
+  [key: string]: unknown
+}
+
 export interface Message {
   id: string
   role: MessageRole
@@ -74,7 +93,7 @@ export interface Message {
   model?: string
   providerId?: string
   timestamp: string
-  metadata?: Record<string, unknown>
+  metadata?: MessageMetadata
 }
 
 // ─── Preview / Renderers ──────────────────────────────────────
@@ -101,3 +120,98 @@ export interface WorkspaceSummary {
 // ─── UI State ────────────────────────────────────────────────
 
 export type Theme = "dark" | "light"
+
+// ─── Tool Calling ─────────────────────────────────────────────
+
+export interface ToolParameterProperty {
+  type: string
+  description: string
+  enum?: string[]
+  /** For array types */
+  items?:
+    | ToolParameterProperty
+    | {
+        type: string
+        properties?: Record<string, ToolParameterProperty>
+        required?: string[]
+      }
+}
+
+export interface ToolParameterSchema {
+  type: "object"
+  properties: Record<string, ToolParameterProperty>
+  required?: string[]
+}
+
+export interface ToolDefinition {
+  name: string
+  description: string
+  parameters: ToolParameterSchema
+}
+
+export interface ToolCall {
+  id: string
+  name: string
+  arguments: Record<string, unknown>
+}
+
+export type AgentMessage =
+  | { role: "user" | "system"; content: string }
+  | { role: "assistant"; content: string; toolCalls?: ToolCall[] }
+  | { role: "tool"; toolCallId: string; name: string; content: string }
+
+// ─── Skills ──────────────────────────────────────────────────
+
+export interface Skill {
+  id: string
+  name: string
+  description: string
+  systemPrompt: string
+  /** Subset of tool names; undefined = all tools */
+  tools?: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+// ─── Tool Activity (UI state) ─────────────────────────────────
+
+export type ToolStatus = "running" | "done" | "error"
+
+export interface ToolActivity {
+  id: string
+  name: string
+  args: Record<string, unknown>
+  status: ToolStatus
+  result?: unknown
+  startedAt: string
+  finishedAt?: string
+  /** Set when this activity was spawned inside a sub-agent */
+  subAgent?: string
+}
+
+// ─── Event Bus Events ────────────────────────────────────────
+
+export interface TaskDispatchEvent {
+  /** Unique correlation ID for this dispatch */
+  id: string
+  sourceType: MessageSource
+  targetWorkspaceId: string
+  task: string
+  priority?: "normal" | "high"
+}
+
+export interface TaskStatusEvent {
+  dispatchId: string
+  workspaceId: string
+  status: "received" | "processing" | "completed" | "failed"
+  progress?: string
+}
+
+export interface TaskResultEvent {
+  dispatchId: string
+  workspaceId: string
+  /** Full result text */
+  result: string
+  /** Short summary (≤200 chars) for Majordomo display */
+  summary: string
+}

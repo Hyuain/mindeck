@@ -6,17 +6,11 @@ use keyring::Entry;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::str::FromStr;
 use tauri::ipc::Channel;
 
-// ─── Shared types ─────────────────────────────────────────────
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-}
+// ─── Stream events ────────────────────────────────────────────
 
 /// Events sent through the Channel back to the frontend.
 #[derive(Debug, Clone, Serialize)]
@@ -25,12 +19,15 @@ pub enum StreamEvent {
     Chunk { delta: String },
     Done,
     Error { message: String },
+    ToolCallStart { id: String, name: String },
+    ToolCallArgsDelta { id: String, delta: String },
+    ToolCallEnd { id: String },
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProbeResult {
-    pub status: String, // "connected" | "error"
+    pub status: String,
     pub latency_ms: Option<u64>,
     pub message: Option<String>,
 }
@@ -71,47 +68,9 @@ fn make_headers(pairs: &[(&str, &str)]) -> Result<HeaderMap, AppError> {
     Ok(headers)
 }
 
-// ─── SSE line parsers ─────────────────────────────────────────
-
-/// Extract text delta from an OpenAI-format SSE data line.
-/// Returns None to continue, Some("") on [DONE], Some(delta) on text.
-fn parse_openai_sse_line(data: &str) -> Option<String> {
-    if data == "[DONE]" {
-        return Some(String::new()); // signals stream end
-    }
-    let parsed: serde_json::Value = serde_json::from_str(data).ok()?;
-    let delta = parsed["choices"][0]["delta"]["content"].as_str()?;
-    if delta.is_empty() {
-        None
-    } else {
-        Some(delta.to_owned())
-    }
-}
-
-/// Extract text delta from an Anthropic-format SSE data line.
-fn parse_anthropic_sse_line(data: &str) -> Option<String> {
-    let parsed: serde_json::Value = serde_json::from_str(data).ok()?;
-    match parsed["type"].as_str()? {
-        "content_block_delta" => {
-            let delta = &parsed["delta"];
-            if delta["type"].as_str() == Some("text_delta") {
-                let text = delta["text"].as_str()?;
-                if text.is_empty() {
-                    None
-                } else {
-                    Some(text.to_owned())
-                }
-            } else {
-                None
-            }
-        }
-        "message_stop" => Some(String::new()), // signals stream end
-        _ => None,
-    }
-}
-
 // ─── Streaming backends ───────────────────────────────────────
 
+/// Stream OpenAI-format SSE, including tool call fragments.
 async fn stream_openai_sse(
     on_event: &Channel<StreamEvent>,
     client: &Client,
@@ -138,6 +97,8 @@ async fn stream_openai_sse(
 
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
+    // index -> (id, name)
+    let mut tool_calls: HashMap<usize, (String, String)> = HashMap::new();
 
     while let Some(result) = stream.next().await {
         let chunk = result.map_err(|e| AppError::Other(e.to_string()))?;
@@ -151,16 +112,56 @@ async fn stream_openai_sse(
                 continue;
             }
             let data = &line[6..];
-            match parse_openai_sse_line(data) {
-                Some(delta) if delta.is_empty() => {
-                    // [DONE] sentinel
-                    let _ = on_event.send(StreamEvent::Done);
-                    return Ok(());
+
+            if data == "[DONE]" {
+                for (_, (id, _)) in &tool_calls {
+                    let _ = on_event.send(StreamEvent::ToolCallEnd { id: id.clone() });
                 }
-                Some(delta) => {
-                    let _ = on_event.send(StreamEvent::Chunk { delta });
+                let _ = on_event.send(StreamEvent::Done);
+                return Ok(());
+            }
+
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                let delta = &parsed["choices"][0]["delta"];
+
+                // Text delta
+                if let Some(text) = delta["content"].as_str() {
+                    if !text.is_empty() {
+                        let _ = on_event.send(StreamEvent::Chunk {
+                            delta: text.to_owned(),
+                        });
+                    }
                 }
-                None => {}
+
+                // Tool call fragments
+                if let Some(tcs) = delta["tool_calls"].as_array() {
+                    for tc in tcs {
+                        let idx = tc["index"].as_u64().unwrap_or(0) as usize;
+
+                        // New call — emit start
+                        if let Some(id) = tc["id"].as_str() {
+                            let name =
+                                tc["function"]["name"].as_str().unwrap_or("").to_owned();
+                            tool_calls.insert(idx, (id.to_owned(), name.clone()));
+                            let _ = on_event.send(StreamEvent::ToolCallStart {
+                                id: id.to_owned(),
+                                name,
+                            });
+                        }
+
+                        // Arguments fragment
+                        if let Some(args_delta) = tc["function"]["arguments"].as_str() {
+                            if !args_delta.is_empty() {
+                                if let Some((id, _)) = tool_calls.get(&idx) {
+                                    let _ = on_event.send(StreamEvent::ToolCallArgsDelta {
+                                        id: id.clone(),
+                                        delta: args_delta.to_owned(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -169,6 +170,7 @@ async fn stream_openai_sse(
     Ok(())
 }
 
+/// Stream Ollama native NDJSON, including basic tool call detection.
 async fn stream_ollama_ndjson(
     on_event: &Channel<StreamEvent>,
     client: &Client,
@@ -213,7 +215,28 @@ async fn stream_ollama_ndjson(
                         });
                     }
                 }
+
                 if parsed["done"].as_bool() == Some(true) {
+                    // Emit tool calls from final done message (Ollama native format)
+                    if let Some(tcs) = parsed["message"]["tool_calls"].as_array() {
+                        for (idx, tc) in tcs.iter().enumerate() {
+                            let id = format!("ollama-tool-{idx}");
+                            let name =
+                                tc["function"]["name"].as_str().unwrap_or("").to_owned();
+                            let args =
+                                serde_json::to_string(&tc["function"]["arguments"])
+                                    .unwrap_or_default();
+                            let _ = on_event.send(StreamEvent::ToolCallStart {
+                                id: id.clone(),
+                                name,
+                            });
+                            let _ = on_event.send(StreamEvent::ToolCallArgsDelta {
+                                id: id.clone(),
+                                delta: args,
+                            });
+                            let _ = on_event.send(StreamEvent::ToolCallEnd { id });
+                        }
+                    }
                     let _ = on_event.send(StreamEvent::Done);
                     return Ok(());
                 }
@@ -225,6 +248,7 @@ async fn stream_ollama_ndjson(
     Ok(())
 }
 
+/// Stream Anthropic-format SSE, including tool_use block events.
 async fn stream_anthropic_sse(
     on_event: &Channel<StreamEvent>,
     client: &Client,
@@ -251,6 +275,8 @@ async fn stream_anthropic_sse(
 
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
+    // block_index -> id
+    let mut tool_block_ids: HashMap<u64, String> = HashMap::new();
 
     while let Some(result) = stream.next().await {
         let chunk = result.map_err(|e| AppError::Other(e.to_string()))?;
@@ -264,15 +290,63 @@ async fn stream_anthropic_sse(
                 continue;
             }
             let data = &line[6..];
-            match parse_anthropic_sse_line(data) {
-                Some(delta) if delta.is_empty() => {
-                    let _ = on_event.send(StreamEvent::Done);
-                    return Ok(());
+
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                match parsed["type"].as_str() {
+                    Some("content_block_start") => {
+                        let block = &parsed["content_block"];
+                        if block["type"].as_str() == Some("tool_use") {
+                            let id = block["id"].as_str().unwrap_or("").to_owned();
+                            let name = block["name"].as_str().unwrap_or("").to_owned();
+                            let index = parsed["index"].as_u64().unwrap_or(0);
+                            tool_block_ids.insert(index, id.clone());
+                            let _ = on_event.send(StreamEvent::ToolCallStart { id, name });
+                        }
+                    }
+                    Some("content_block_delta") => {
+                        let block_delta = &parsed["delta"];
+                        match block_delta["type"].as_str() {
+                            Some("text_delta") => {
+                                if let Some(text) = block_delta["text"].as_str() {
+                                    if !text.is_empty() {
+                                        let _ = on_event.send(StreamEvent::Chunk {
+                                            delta: text.to_owned(),
+                                        });
+                                    }
+                                }
+                            }
+                            Some("input_json_delta") => {
+                                let index = parsed["index"].as_u64().unwrap_or(0);
+                                if let Some(id) = tool_block_ids.get(&index) {
+                                    if let Some(delta) =
+                                        block_delta["partial_json"].as_str()
+                                    {
+                                        if !delta.is_empty() {
+                                            let _ =
+                                                on_event.send(StreamEvent::ToolCallArgsDelta {
+                                                    id: id.clone(),
+                                                    delta: delta.to_owned(),
+                                                });
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Some("content_block_stop") => {
+                        let index = parsed["index"].as_u64().unwrap_or(0);
+                        if let Some(id) = tool_block_ids.get(&index) {
+                            let _ = on_event
+                                .send(StreamEvent::ToolCallEnd { id: id.clone() });
+                        }
+                    }
+                    Some("message_stop") => {
+                        let _ = on_event.send(StreamEvent::Done);
+                        return Ok(());
+                    }
+                    _ => {}
                 }
-                Some(delta) => {
-                    let _ = on_event.send(StreamEvent::Chunk { delta });
-                }
-                None => {}
             }
         }
     }
@@ -283,38 +357,43 @@ async fn stream_anthropic_sse(
 
 // ─── Commands ─────────────────────────────────────────────────
 
-/// Stream a chat completion. Events are sent through `on_event` channel.
-/// Provider config is loaded from disk; API key is fetched from OS Keychain.
+/// Stream a chat completion. `messages` and `tools` are pre-formatted by the
+/// TypeScript bridge and passed verbatim to the provider API.
 #[tauri::command]
 pub async fn stream_chat(
     on_event: Channel<StreamEvent>,
     provider_id: String,
     model_id: String,
-    messages: Vec<ChatMessage>,
+    messages: Vec<serde_json::Value>,
+    tools: Option<serde_json::Value>,
 ) -> Result<(), AppError> {
     let record = load_provider(&provider_id)?
         .ok_or_else(|| AppError::Other(format!("Provider '{provider_id}' not found")))?;
 
     let api_key = match &record.keychain_alias {
         Some(alias) => get_api_key(alias)?,
-        None => String::new(), // Ollama — no key needed
+        None => String::new(),
     };
 
     let client = build_client()?;
 
-    let msgs: Vec<serde_json::Value> = messages
-        .iter()
-        .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
-        .collect();
-
     let result = match record.provider_type.as_str() {
         "ollama" => {
             let url = format!("{}/api/chat", record.base_url.trim_end_matches('/'));
-            let body = serde_json::json!({
-                "model": model_id,
-                "messages": msgs,
-                "stream": true
-            });
+            let body = if let Some(ref t) = tools {
+                serde_json::json!({
+                    "model": model_id,
+                    "messages": messages,
+                    "stream": true,
+                    "tools": t
+                })
+            } else {
+                serde_json::json!({
+                    "model": model_id,
+                    "messages": messages,
+                    "stream": true
+                })
+            };
             stream_ollama_ndjson(&on_event, &client, &url, body).await
         }
         "minimax" => {
@@ -324,26 +403,72 @@ pub async fn stream_chat(
                 ("authorization", &format!("Bearer {api_key}")),
                 ("anthropic-version", "2023-06-01"),
             ])?;
-            let body = serde_json::json!({
-                "model": model_id,
-                "messages": msgs,
-                "max_tokens": 4096,
-                "stream": true
-            });
+
+            // Anthropic protocol requires system content as a top-level "system"
+            // field — system-role messages in the array cause HTTP 400.
+            let system_text: String = messages
+                .iter()
+                .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
+                .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            let chat_messages: Vec<&serde_json::Value> = messages
+                .iter()
+                .filter(|m| m.get("role").and_then(|r| r.as_str()) != Some("system"))
+                .collect();
+
+            let body = match (system_text.is_empty(), &tools) {
+                (false, Some(t)) => serde_json::json!({
+                    "model": model_id,
+                    "system": system_text,
+                    "messages": chat_messages,
+                    "max_tokens": 4096,
+                    "stream": true,
+                    "tools": t
+                }),
+                (false, None) => serde_json::json!({
+                    "model": model_id,
+                    "system": system_text,
+                    "messages": chat_messages,
+                    "max_tokens": 4096,
+                    "stream": true
+                }),
+                (true, Some(t)) => serde_json::json!({
+                    "model": model_id,
+                    "messages": chat_messages,
+                    "max_tokens": 4096,
+                    "stream": true,
+                    "tools": t
+                }),
+                (true, None) => serde_json::json!({
+                    "model": model_id,
+                    "messages": chat_messages,
+                    "max_tokens": 4096,
+                    "stream": true
+                }),
+            };
             stream_anthropic_sse(&on_event, &client, &url, headers, body).await
         }
         _ => {
-            // openai-compatible: DeepSeek, Qwen, etc.
             let url = format!("{}/chat/completions", record.base_url.trim_end_matches('/'));
             let headers = make_headers(&[
                 ("content-type", "application/json"),
                 ("authorization", &format!("Bearer {api_key}")),
             ])?;
-            let body = serde_json::json!({
-                "model": model_id,
-                "messages": msgs,
-                "stream": true
-            });
+            let body = if let Some(ref t) = tools {
+                serde_json::json!({
+                    "model": model_id,
+                    "messages": messages,
+                    "stream": true,
+                    "tools": t
+                })
+            } else {
+                serde_json::json!({
+                    "model": model_id,
+                    "messages": messages,
+                    "stream": true
+                })
+            };
             stream_openai_sse(&on_event, &client, &url, headers, body).await
         }
     };
@@ -377,7 +502,6 @@ pub async fn probe_provider(provider_id: String) -> Result<ProbeResult, AppError
             client.get(&url).send().await
         }
         "minimax" => {
-            // Minimal non-streaming request to verify the key
             let url = format!("{}/v1/messages", record.base_url.trim_end_matches('/'));
             client
                 .post(&url)
@@ -392,7 +516,6 @@ pub async fn probe_provider(provider_id: String) -> Result<ProbeResult, AppError
                 .await
         }
         _ => {
-            // OpenAI-compatible: GET /models
             let url = format!("{}/models", record.base_url.trim_end_matches('/'));
             client
                 .get(&url)
@@ -422,8 +545,6 @@ pub async fn probe_provider(provider_id: String) -> Result<ProbeResult, AppError
 }
 
 /// List available models for a provider.
-/// Ollama: fetches /api/tags. OpenAI-compatible: fetches /models.
-/// MiniMax and other fixed-model providers: returns the static list embedded here.
 #[tauri::command]
 pub async fn list_provider_models(provider_id: String) -> Result<Vec<ModelInfo>, AppError> {
     let record = load_provider(&provider_id)?
@@ -460,7 +581,6 @@ pub async fn list_provider_models(provider_id: String) -> Result<Vec<ModelInfo>,
             Ok(models)
         }
         _ => {
-            // OpenAI-compatible
             let api_key = match &record.keychain_alias {
                 Some(alias) => get_api_key(alias).unwrap_or_default(),
                 None => String::new(),
@@ -496,8 +616,7 @@ pub async fn list_provider_models(provider_id: String) -> Result<Vec<ModelInfo>,
     }
 }
 
-/// Validate a provider connection using raw parameters (before it is saved to disk).
-/// Used by the "Add Provider" form to test credentials before committing.
+/// Validate a provider connection using raw parameters.
 #[tauri::command]
 pub async fn probe_url(
     provider_type: String,
@@ -509,9 +628,7 @@ pub async fn probe_url(
     let start = std::time::Instant::now();
 
     let result = match provider_type.as_str() {
-        "ollama" => {
-            client.get(format!("{base}/api/tags")).send().await
-        }
+        "ollama" => client.get(format!("{base}/api/tags")).send().await,
         "minimax" => {
             client
                 .post(format!("{base}/v1/messages"))
@@ -583,4 +700,14 @@ fn minimax_static_models() -> Vec<ModelInfo> {
             context_length: Some(204_800),
         },
     ]
+}
+
+// ─── Legacy type kept for potential future use ────────────────
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
 }

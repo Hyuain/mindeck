@@ -16,6 +16,9 @@ interface WorkspaceRecord {
 }
 
 function fromRecord(r: WorkspaceRecord): Workspace {
+  // Smart default: if repoPath is set and no explicit type, it must be linked
+  const workspaceType: WorkspaceType =
+    (r.workspaceType as WorkspaceType) ?? (r.repoPath ? "linked" : "internal")
   return {
     id: r.id,
     name: r.name,
@@ -24,7 +27,7 @@ function fromRecord(r: WorkspaceRecord): Workspace {
     updatedAt: r.updatedAt,
     agentConfig: r.agentConfig,
     layout: r.layout,
-    workspaceType: (r.workspaceType as WorkspaceType) ?? "internal",
+    workspaceType,
     repoPath: r.repoPath,
     stateSummary: r.stateSummary,
     status: (r.status as Workspace["status"]) ?? "idle",

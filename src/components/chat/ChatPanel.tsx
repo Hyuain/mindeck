@@ -1,13 +1,15 @@
-import { useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useCallback, useState } from "react"
+import { Eraser } from "lucide-react"
 import { useChatStore } from "@/stores/chat"
 import { useProviderStore } from "@/stores/provider"
 import { useWorkspaceStore } from "@/stores/workspace"
-import { providerManager } from "@/services/providers/manager"
-import { loadMessages, appendMessage, makeMessage } from "@/services/conversation"
+import { loadMessages, clearMessages } from "@/services/conversation"
+import { WorkspaceAgent } from "@/services/workspace-agent"
 import { ModelSelector } from "@/components/provider/ModelSelector"
 import { MessageList } from "./MessageList"
 import { ChatInput } from "./ChatInput"
-import type { Workspace } from "@/types"
+import { ToolActivityRow } from "@/components/majordomo/ToolActivityRow"
+import type { ToolActivity, Workspace } from "@/types"
 
 interface ChatPanelProps {
   workspace: Workspace
@@ -19,12 +21,16 @@ export function ChatPanel({ workspace, onPreview }: ChatPanelProps) {
     messages,
     streaming,
     setMessages,
-    appendMessage: storeAppend,
-    updateLastMessage,
-    setStreaming,
+    clearMessages: clearChatMessages,
   } = useChatStore()
   const { providers } = useProviderStore()
   const { updateWorkspace } = useWorkspaceStore()
+
+  const [toolActivities, setToolActivities] = useState<ToolActivity[]>([])
+  const [pendingDispatch, setPendingDispatch] = useState<string | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
+
+  const agentRef = useRef<WorkspaceAgent | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   const msgs = messages[workspace.id] ?? []
@@ -32,84 +38,90 @@ export function ChatPanel({ workspace, onPreview }: ChatPanelProps) {
 
   // Load persisted messages on workspace open
   useEffect(() => {
-    if (messages[workspace.id]) return // already loaded
+    if (messages[workspace.id] !== undefined) return // already loaded
     loadMessages(workspace.id)
-      .then((loaded) => setMessages(workspace.id, loaded))
+      .then((loaded) => {
+        // Guard against race: if messages were added during loading (e.g., from a
+        // Majordomo dispatch), don't overwrite them — those are more current.
+        if (useChatStore.getState().messages[workspace.id] === undefined) {
+          setMessages(workspace.id, loaded)
+        }
+      })
       .catch((err: unknown) =>
         console.warn("Could not load messages (browser mode):", err)
       )
   }, [workspace.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSend = useCallback(
-    async (content: string) => {
-      const { providerId, modelId } = workspace.agentConfig
+  // Create / reconnect the workspace agent whenever workspace changes
+  useEffect(() => {
+    abortRef.current?.abort()
+    abortRef.current = new AbortController()
 
-      // 1. Append + persist user message
-      const userMsg = makeMessage("user", content)
-      storeAppend(workspace.id, userMsg)
-      appendMessage(workspace.id, userMsg).catch(console.warn)
+    const { setStreaming } = useChatStore.getState()
 
-      // 2. Prepare conversation history for the request
-      const history = [...(messages[workspace.id] ?? []), userMsg].map((m) => ({
-        role: m.role as "user" | "assistant" | "system",
-        content: m.content,
-      }))
-
-      // 3. Append placeholder AI message
-      const aiMsg = makeMessage("assistant", "", modelId, providerId)
-      storeAppend(workspace.id, aiMsg)
-      setStreaming(workspace.id, true)
-
-      // 4. Stream via Rust — API key is fetched from OS Keychain inside Rust
-      abortRef.current?.abort()
-      abortRef.current = new AbortController()
-      let fullContent = ""
-
-      try {
-        for await (const chunk of providerManager.chat(
-          providerId,
-          modelId,
-          history,
-          abortRef.current.signal,
-        )) {
-          fullContent += chunk.delta
-          updateLastMessage(workspace.id, { content: fullContent })
-        }
-      } catch (err: unknown) {
-        if ((err as Error)?.name !== "AbortError") {
-          const errText = err instanceof Error ? err.message : "Unknown error"
-          updateLastMessage(workspace.id, { content: `Error: ${errText}` })
-        }
-      } finally {
-        setStreaming(workspace.id, false)
-      }
-
-      // 5. Persist complete AI message & emit preview
-      const finalAiMsg = { ...aiMsg, content: fullContent }
-      appendMessage(workspace.id, finalAiMsg).catch(console.warn)
-
-      // 6. Update workspace status summary
-      updateWorkspace(workspace.id, {
-        status: "idle",
-        stateSummary: fullContent.slice(0, 200),
-        updatedAt: new Date().toISOString(),
-      })
-
-      // 7. Auto-preview if response is substantial
-      if (fullContent.length > 50 && onPreview) {
-        onPreview(fullContent)
-      }
-    },
-    [
+    const agent = new WorkspaceAgent({
       workspace,
-      messages,
-      storeAppend,
-      updateLastMessage,
-      setStreaming,
-      updateWorkspace,
-      onPreview,
-    ] // eslint-disable-line react-hooks/exhaustive-deps
-  )
+      signal: abortRef.current.signal,
+      onChunk: (delta) => {
+        if (onPreview && delta.length > 0) {
+          // Accumulate for preview (handled via full content in process())
+        }
+      },
+      onToolStart: (activity) => {
+        setToolActivities((prev) => {
+          const exists = prev.some((a) => a.id === activity.id)
+          return exists
+            ? prev.map((a) => (a.id === activity.id ? activity : a))
+            : [...prev, activity]
+        })
+      },
+      onToolEnd: (activity) => {
+        setToolActivities((prev) =>
+          prev.map((a) => (a.id === activity.id ? activity : a))
+        )
+      },
+      onStreamingChange: (isStreamingNow) => {
+        setStreaming(workspace.id, isStreamingNow)
+        if (!isStreamingNow) {
+          setPendingDispatch(null)
+          // Auto-preview on completion
+          const { messages: currentMessages } = useChatStore.getState()
+          const currentMsgs = currentMessages[workspace.id] ?? []
+          const lastMsg = currentMsgs[currentMsgs.length - 1]
+          if (lastMsg?.role === "assistant" && lastMsg.content.length > 50 && onPreview) {
+            onPreview(lastMsg.content)
+          }
+          // Clear tool activities after a short delay
+          setTimeout(() => setToolActivities([]), 3000)
+        }
+      },
+      onDispatchReceived: (task) => {
+        setPendingDispatch(task)
+      },
+    })
+
+    agent.connect()
+    agentRef.current = agent
+
+    return () => {
+      agent.disconnect()
+      abortRef.current?.abort()
+    }
+  }, [workspace.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep agent config in sync with workspace changes (model changes, etc.)
+  useEffect(() => {
+    agentRef.current?.updateConfig(workspace)
+  }, [workspace])
+
+  const handleSend = useCallback((content: string) => {
+    agentRef.current?.send(content)
+  }, [])
+
+  const handleClearContext = useCallback(() => {
+    clearChatMessages(workspace.id)
+    clearMessages(workspace.id).catch(console.warn)
+  }, [workspace.id, clearChatMessages])
 
   function handleModelChange(providerId: string, modelId: string) {
     updateWorkspace(workspace.id, {
@@ -118,18 +130,64 @@ export function ChatPanel({ workspace, onPreview }: ChatPanelProps) {
     })
   }
 
+  // Active tool activities (those still running or recently finished)
+  const activeActivities = toolActivities.filter((a) => a.status === "running")
+
   return (
-    <div className="chat-panel">
-      <div className="chat-head">
-        <ModelSelector
-          providers={providers}
-          selectedProviderId={workspace.agentConfig.providerId}
-          selectedModelId={workspace.agentConfig.modelId}
-          onChange={handleModelChange}
-        />
+    <>
+      <div className="chat-panel">
+        <div className="chat-head">
+          <ModelSelector
+            providers={providers}
+            selectedProviderId={workspace.agentConfig.providerId}
+            selectedModelId={workspace.agentConfig.modelId}
+            onChange={handleModelChange}
+          />
+          <button
+            className="chat-clear-btn"
+            onClick={() => setConfirmClear(true)}
+            title="Clear conversation history"
+            disabled={isStreaming || msgs.length === 0}
+          >
+            <Eraser size={11} />
+          </button>
+        </div>
+        <MessageList messages={msgs} isStreaming={isStreaming} />
+        {pendingDispatch && (
+          <div className="chat-dispatch-incoming">
+            <span className="chat-dispatch-label">↓ Majordomo</span>
+            <span className="chat-dispatch-task">{pendingDispatch}</span>
+          </div>
+        )}
+        {activeActivities.length > 0 && (
+          <div className="chat-tool-activities">
+            {activeActivities.map((a) => (
+              <ToolActivityRow key={a.id} activity={a} />
+            ))}
+          </div>
+        )}
+        <ChatInput onSend={handleSend} disabled={isStreaming} />
       </div>
-      <MessageList messages={msgs} isStreaming={isStreaming} />
-      <ChatInput onSend={handleSend} disabled={isStreaming} />
-    </div>
+      {confirmClear && (
+        <div className="mj-confirm-overlay" onClick={() => setConfirmClear(false)}>
+          <div className="mj-confirm" onClick={(e) => e.stopPropagation()}>
+            <p className="mj-confirm-msg">
+              Clear conversation history for &ldquo;{workspace.name}&rdquo;?
+            </p>
+            <div className="mj-confirm-actions">
+              <button
+                className="mj-confirm-cancel"
+                onClick={() => setConfirmClear(false)}
+              >
+                Cancel
+              </button>
+              <button className="mj-confirm-delete" onClick={handleClearContext}>
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }

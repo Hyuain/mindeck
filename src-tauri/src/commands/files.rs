@@ -105,3 +105,18 @@ pub async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String
 
     Ok(folder.map(|f| f.to_string()))
 }
+
+#[command]
+pub fn read_file(path: String) -> Result<String, String> {
+    fs::read_to_string(&path).map_err(|e| format!("Failed to read file '{path}': {e}"))
+}
+
+#[command]
+pub fn write_file(path: String, content: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create parent dirs for '{path}': {e}"))?;
+    }
+    fs::write(&path, content).map_err(|e| format!("Failed to write file '{path}': {e}"))
+}

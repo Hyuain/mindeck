@@ -4,3 +4,5 @@ pub mod workspace;
 pub mod chat;
 pub mod stream;
 pub mod files;
+pub mod shell;
+pub mod skills;

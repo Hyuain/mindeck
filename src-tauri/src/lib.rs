@@ -34,11 +34,19 @@ pub fn run() {
             commands::stream::list_provider_models,
             // files
             commands::files::list_dir,
+            commands::files::read_file,
+            commands::files::write_file,
             commands::files::rename_path,
             commands::files::create_file,
             commands::files::create_dir_at,
             commands::files::delete_path,
             commands::files::pick_folder,
+            // shell
+            commands::shell::bash_exec,
+            // skills
+            commands::skills::list_skills,
+            commands::skills::save_skill,
+            commands::skills::delete_skill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

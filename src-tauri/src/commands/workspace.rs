@@ -13,6 +13,7 @@ pub struct WorkspaceRecord {
     pub updated_at: String,
     pub agent_config: AgentConfig,
     pub layout: WorkspaceLayout,
+    pub workspace_type: Option<String>, // "internal" | "linked"
     pub repo_path: Option<String>,
     pub state_summary: Option<String>,
     pub status: String, // "active" | "pending" | "idle"
@@ -77,7 +78,7 @@ pub fn create_workspace(record: WorkspaceRecord) -> Result<(), AppError> {
     let base = workspaces_dir()?;
     let ws_dir = workspace_dir(&base, &record.id);
     // Create workspace directory tree
-    for sub in &["conversations", "knowledge/documents", "knowledge/index", "outputs"] {
+    for sub in &["conversations", "knowledge/documents", "knowledge/index", "outputs", "files"] {
         fs::create_dir_all(ws_dir.join(sub))?;
     }
     let json = serde_json::to_string_pretty(&record)?;
