@@ -4,6 +4,7 @@ mod error;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|_app| Ok(()))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
@@ -26,6 +27,11 @@ pub fn run() {
             commands::chat::load_messages,
             commands::chat::append_message,
             commands::chat::clear_messages,
+            // streaming
+            commands::stream::stream_chat,
+            commands::stream::probe_provider,
+            commands::stream::probe_url,
+            commands::stream::list_provider_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,7 +1,7 @@
 use crate::error::AppError;
 use keyring::Entry;
 
-const SERVICE_NAME: &str = "app.mindeck";
+pub const SERVICE_NAME: &str = "app.mindeck";
 
 /// Store an API key in the OS keychain.
 /// `alias` is the provider id, e.g. "deepseek" or "qwen".

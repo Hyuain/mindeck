@@ -244,6 +244,7 @@ body {
 .pcard-name { font-size: 12px; font-weight: 500; color: var(--color-t0); margin-bottom: 2px; }
 .pcard-status { font-size: 10px; font-family: var(--font-mono); color: var(--color-t2); }
 .pcard-status.ok { color: var(--color-ac); }
+.pcard-model { font-size: 10px; font-family: var(--font-mono); color: var(--color-t2); margin-top: 1px; }
 .p0 {
   font-size: 9px; font-family: var(--font-mono);
   padding: 2px 6px; border-radius: 3px; flex-shrink: 0;

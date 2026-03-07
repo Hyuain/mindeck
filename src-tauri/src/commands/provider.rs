@@ -12,25 +12,40 @@ pub struct ProviderRecord {
     pub id: String,
     pub name: String,
     #[serde(rename = "type")]
-    pub provider_type: String, // "ollama" | "openai-compatible"
+    pub provider_type: String, // "ollama" | "openai-compatible" | "minimax"
     pub base_url: String,
     /// References the keychain alias; None for Ollama (no key needed).
     pub keychain_alias: Option<String>,
     pub priority: String, // "p0" | "p1" | "p2"
+    /// The default model ID selected by the user for this provider.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<String>,
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-fn providers_dir() -> Result<PathBuf, AppError> {
+pub fn providers_dir() -> Result<PathBuf, AppError> {
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("Cannot resolve home dir".into()))?;
     Ok(home.join(".mindeck").join("providers"))
 }
 
-fn provider_path(dir: &PathBuf, id: &str) -> PathBuf {
+pub fn provider_path(dir: &PathBuf, id: &str) -> PathBuf {
     dir.join(format!("{}.json", id))
 }
 
 // ─── Commands ─────────────────────────────────────────────────
+
+/// Load a single provider by id. Returns None if not found.
+pub fn load_provider(id: &str) -> Result<Option<ProviderRecord>, AppError> {
+    let dir = providers_dir()?;
+    let path = provider_path(&dir, id);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&path)?;
+    let record: ProviderRecord = serde_json::from_str(&raw)?;
+    Ok(Some(record))
+}
 
 /// Return all saved provider configs.
 #[tauri::command]

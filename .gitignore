@@ -9,6 +9,9 @@ dist-ssr/
 src-tauri/target/
 src-tauri/gen/
 src-tauri/WixTools/
+*.dmg
+*.app.tar.gz
+*.app.tar.gz.sig
 
 # Vite
 *.local
@@ -42,5 +45,15 @@ coverage/
 
 # Misc
 *.tsbuildinfo
+*.d.ts.map
+
+# Rust
+Cargo.lock.bak
+
+# Tauri bundle output
+src-tauri/target/release/bundle/
+
+# App data (never commit user data)
+.mindeck/
 
 discussions/

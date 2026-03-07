@@ -4,10 +4,15 @@ import { useProviderStore } from "@/stores/provider"
 import { useUIStore } from "@/stores/ui"
 import { listProviders, saveProvider, deleteProvider } from "@/services/providers/storage"
 import { setApiKey, deleteApiKey } from "@/services/providers/keychain"
-import { providerManager } from "@/services/providers/manager"
+import { probeUrl } from "@/services/providers/bridge"
+import { PROVIDER_MODELS } from "@/services/providers/models"
 import { ProviderCard } from "./ProviderCard"
 import type { ProviderConfig } from "@/types"
 import type { HealthStatus } from "@/services/providers/types"
+
+// ─── Recommended models per provider ──────────────────────────
+
+const RECOMMENDED_MODELS = PROVIDER_MODELS
 
 // ─── Preset provider definitions ─────────────────────────────
 
@@ -25,6 +30,13 @@ const PRESETS = [
     icon: "🔮",
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     type: "openai-compatible" as const,
+  },
+  {
+    id: "minimax",
+    name: "MiniMax",
+    icon: "🌊",
+    baseUrl: "https://api.minimax.io/anthropic",
+    type: "minimax" as const,
   },
   {
     id: "openai-compat",
@@ -51,26 +63,34 @@ interface AddFormState {
   presetId: string
   baseUrl: string
   apiKey: string
+  modelId: string
 }
 
 function AddProviderForm({ onAdded }: { onAdded: () => void }) {
   const baseUrlId = useId()
   const apiKeyId = useId()
+  const modelId = useId()
   const [form, setForm] = useState<AddFormState>({
     presetId: "deepseek",
     baseUrl: PRESETS[0].baseUrl,
     apiKey: "",
+    modelId: RECOMMENDED_MODELS["deepseek"]?.[0]?.id ?? "",
   })
   const [validation, setValidation] = useState<HealthStatus | null>(null)
   const [checking, setChecking] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  const preset = PRESETS.find((p) => p.id === form.presetId)
+  const recommendedModels = RECOMMENDED_MODELS[form.presetId] ?? []
+
   function selectPreset(id: string) {
-    const preset = PRESETS.find((p) => p.id === id)
+    const p = PRESETS.find((pr) => pr.id === id)
+    const models = RECOMMENDED_MODELS[id] ?? []
     setForm((f) => ({
       ...f,
       presetId: id,
-      baseUrl: preset?.baseUrl ?? f.baseUrl,
+      baseUrl: p?.baseUrl ?? f.baseUrl,
+      modelId: models[0]?.id ?? "",
     }))
     setValidation(null)
   }
@@ -79,17 +99,8 @@ function AddProviderForm({ onAdded }: { onAdded: () => void }) {
     setChecking(true)
     setValidation(null)
     try {
-      const preset = PRESETS.find((p) => p.id === form.presetId)
       if (!preset) return
-      const adapter = providerManager.fromConfig({
-        id: preset.id,
-        name: preset.name,
-        type: preset.type,
-        baseUrl: form.baseUrl,
-        isConnected: false,
-        priority: "p0",
-      })
-      const result = await adapter.healthCheck(form.apiKey)
+      const result = await probeUrl(preset.type, form.baseUrl, form.apiKey)
       setValidation(result)
     } catch {
       setValidation({ status: "error", message: "Request failed" })
@@ -100,10 +111,9 @@ function AddProviderForm({ onAdded }: { onAdded: () => void }) {
 
   async function save() {
     if (!form.apiKey && form.presetId !== "ollama") return
+    if (!preset) return
     setSaving(true)
     try {
-      const preset = PRESETS.find((p) => p.id === form.presetId)
-      if (!preset) return
       const keychainAlias = `provider-${preset.id}`
       if (form.apiKey) {
         await setApiKey(keychainAlias, form.apiKey)
@@ -116,6 +126,7 @@ function AddProviderForm({ onAdded }: { onAdded: () => void }) {
         keychainAlias,
         isConnected: validation?.status === "connected",
         priority: "p0",
+        defaultModel: form.modelId || undefined,
       }
       await saveProvider(config)
       onAdded()
@@ -159,7 +170,12 @@ function AddProviderForm({ onAdded }: { onAdded: () => void }) {
           value={form.baseUrl}
           onChange={(e) => setForm((f) => ({ ...f, baseUrl: e.target.value }))}
         />
-        <div className="fi-hint">OpenAI-compatible endpoint</div>
+        {preset?.type === "minimax" && (
+          <div className="fi-hint">MiniMax Anthropic-compatible endpoint</div>
+        )}
+        {preset?.type === "openai-compatible" && (
+          <div className="fi-hint">OpenAI-compatible endpoint</div>
+        )}
       </div>
 
       {/* API Key */}
@@ -205,6 +221,47 @@ function AddProviderForm({ onAdded }: { onAdded: () => void }) {
         )}
         <div className="fi-hint">Stored in OS Keychain — never written to disk</div>
       </div>
+
+      {/* Default model selector */}
+      {recommendedModels.length > 0 && (
+        <div className="fg">
+          <label className="fl" htmlFor={modelId}>
+            Default Model
+          </label>
+          <select
+            id={modelId}
+            className="fi"
+            value={form.modelId}
+            onChange={(e) => setForm((f) => ({ ...f, modelId: e.target.value }))}
+          >
+            {recommendedModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+                {m.contextLength != null
+                  ? ` — ${(m.contextLength / 1000).toFixed(0)}k ctx`
+                  : ""}
+              </option>
+            ))}
+          </select>
+          <div className="fi-hint">Recommended models for this provider</div>
+        </div>
+      )}
+      {recommendedModels.length === 0 && form.presetId !== "ollama" && (
+        <div className="fg">
+          <label className="fl" htmlFor={modelId}>
+            Default Model
+          </label>
+          <input
+            id={modelId}
+            className="fi"
+            type="text"
+            placeholder="e.g. gpt-4o"
+            value={form.modelId}
+            onChange={(e) => setForm((f) => ({ ...f, modelId: e.target.value }))}
+          />
+          <div className="fi-hint">Model ID from your provider's documentation</div>
+        </div>
+      )}
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button className="btn-solid" onClick={save} disabled={saving}>

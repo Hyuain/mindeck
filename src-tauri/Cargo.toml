@@ -22,6 +22,12 @@ serde_json = "1"
 thiserror = "2"
 keyring = { version = "3", features = ["apple-native"] }
 dirs = "6"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = "0.3"
+
+[patch.crates-io]
+tao = { git = "https://github.com/tauri-apps/tao" }
+wry = { path = "/tmp/wry-patched" }
 
 [profile.release]
 panic = "abort"

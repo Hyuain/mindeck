@@ -1,117 +1,127 @@
-import { useRef, useState, type KeyboardEvent } from "react";
-import { SendHorizontal } from "lucide-react";
-import { useSuperAgentStore } from "@/stores/super-agent";
-import { useWorkspaceStore } from "@/stores/workspace";
-import { useProviderStore } from "@/stores/provider";
-import { providerManager } from "@/services/providers/manager";
-import { getApiKey } from "@/services/providers/keychain";
-import { makeMessage } from "@/services/conversation";
-import type { WorkspaceSummary } from "@/types";
+import { useRef, useState, type KeyboardEvent } from "react"
+import { SendHorizontal } from "lucide-react"
+import { useSuperAgentStore } from "@/stores/super-agent"
+import { useWorkspaceStore } from "@/stores/workspace"
+import { useProviderStore } from "@/stores/provider"
+import { providerManager } from "@/services/providers/manager"
+import { makeMessage } from "@/services/conversation"
+import type { WorkspaceSummary } from "@/types"
 
 const STATUS_COLOR: Record<string, string> = {
   active: "var(--color-ac)",
   pending: "var(--color-yellow)",
   idle: "var(--color-t2)",
-};
+}
 
 const STATUS_LABEL: Record<string, string> = {
   active: "active",
   pending: "pending",
   idle: "idle",
-};
+}
 
 export function SuperAgentPanel() {
-  const { messages, isStreaming, appendMessage, updateLastMessage, setStreaming, workspaceSummaries } =
-    useSuperAgentStore();
-  const { workspaces, activeWorkspaceId, setActiveWorkspace } = useWorkspaceStore();
-  const { providers } = useProviderStore();
+  const {
+    messages,
+    isStreaming,
+    appendMessage,
+    updateLastMessage,
+    setStreaming,
+    workspaceSummaries,
+  } = useSuperAgentStore()
+  const { workspaces, activeWorkspaceId, setActiveWorkspace } = useWorkspaceStore()
+  const { providers } = useProviderStore()
 
-  const [input, setInput] = useState("");
-  const abortRef = useRef<AbortController | null>(null);
-  const msgsEndRef = useRef<HTMLDivElement>(null);
+  const [input, setInput] = useState("")
+  const abortRef = useRef<AbortController | null>(null)
+  const msgsEndRef = useRef<HTMLDivElement>(null)
 
   async function handleSend() {
-    const content = input.trim();
-    if (!content || isStreaming) return;
-    setInput("");
+    const content = input.trim()
+    if (!content || isStreaming) return
+    setInput("")
 
     // Build system prompt with workspace state
     const summaryText = workspaces
       .map((ws) => {
-        const sum = workspaceSummaries.find((s) => s.workspaceId === ws.id);
-        return `[${ws.name}] status=${ws.status} summary="${sum?.snippet ?? ws.stateSummary ?? "no activity yet"}"`;
+        const sum = workspaceSummaries.find((s) => s.workspaceId === ws.id)
+        return `[${ws.name}] status=${ws.status} summary="${sum?.snippet ?? ws.stateSummary ?? "no activity yet"}"`
       })
-      .join("\n");
+      .join("\n")
 
-    const systemPrompt = `You are Super Agent, a global cross-workspace assistant for Mindeck. You have visibility into all workspaces.\n\nCurrent workspace states:\n${summaryText}\n\nBe concise. Reference workspaces by name. Help the user orchestrate their work.`;
+    const systemPrompt = `You are Super Agent, a global cross-workspace assistant for Mindeck. You have visibility into all workspaces.\n\nCurrent workspace states:\n${summaryText}\n\nBe concise. Reference workspaces by name. Help the user orchestrate their work.`
 
-    const userMsg = makeMessage("user", content);
-    appendMessage(userMsg);
+    const userMsg = makeMessage("user", content)
+    appendMessage(userMsg)
 
     // Pick first available provider
-    const provider = providers[0];
+    const provider = providers[0]
     if (!provider) {
-      appendMessage(makeMessage("assistant", "No providers configured. Open Settings (⌘,) to add a model."));
-      return;
+      appendMessage(
+        makeMessage(
+          "assistant",
+          "No providers configured. Open Settings (⌘,) to add a model."
+        )
+      )
+      return
     }
-
-    const adapter = providerManager.fromConfig(provider);
-    const apiKey = provider.keychainAlias
-      ? await getApiKey(provider.keychainAlias).catch(() => "")
-      : "";
 
     const history = [
       { role: "system" as const, content: systemPrompt },
-      ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+      ...messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
       { role: "user" as const, content },
-    ];
+    ]
 
-    const aiMsg = makeMessage("assistant", "", provider.models?.[0]?.id ?? provider.id, provider.id);
-    appendMessage(aiMsg);
-    setStreaming(true);
+    const modelId = provider.defaultModel ?? provider.models?.[0]?.id ?? "llama3.2"
+    const aiMsg = makeMessage("assistant", "", modelId, provider.id)
+    appendMessage(aiMsg)
+    setStreaming(true)
 
-    abortRef.current?.abort();
-    abortRef.current = new AbortController();
-    let full = "";
+    abortRef.current?.abort()
+    abortRef.current = new AbortController()
+    let full = ""
 
     try {
-      for await (const chunk of adapter.chat({
-        modelId: provider.models?.[0]?.id ?? "llama3.2",
-        messages: history,
-        apiKey,
-        signal: abortRef.current.signal,
-      })) {
-        full += chunk.delta;
-        updateLastMessage({ content: full });
-        msgsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      // Rust fetches the API key from OS Keychain internally
+      for await (const chunk of providerManager.chat(
+        provider.id,
+        modelId,
+        history,
+        abortRef.current.signal
+      )) {
+        full += chunk.delta
+        updateLastMessage({ content: full })
+        msgsEndRef.current?.scrollIntoView({ behavior: "smooth" })
       }
     } catch (err: unknown) {
       if ((err as Error)?.name !== "AbortError") {
-        updateLastMessage({ content: `Error: ${(err as Error).message}` });
+        updateLastMessage({ content: `Error: ${(err as Error).message}` })
       }
     } finally {
-      setStreaming(false);
+      setStreaming(false)
     }
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+      e.preventDefault()
+      handleSend()
     }
   }
 
   // Build summaries from store, falling back to workspace state
   const summaries: WorkspaceSummary[] = workspaces.map((ws) => {
-    const stored = workspaceSummaries.find((s) => s.workspaceId === ws.id);
+    const stored = workspaceSummaries.find((s) => s.workspaceId === ws.id)
     return {
       workspaceId: ws.id,
       workspaceName: ws.name,
       status: ws.status,
       snippet: stored?.snippet ?? ws.stateSummary ?? "No activity yet",
       updatedAt: ws.updatedAt,
-    };
-  });
+    }
+  })
 
   return (
     <div className="sa-panel">
@@ -192,5 +202,5 @@ export function SuperAgentPanel() {
         </div>
       </div>
     </div>
-  );
+  )
 }

@@ -1,45 +1,51 @@
-import { useState } from "react";
-import { Trash2 } from "lucide-react";
-import type { ProviderConfig } from "@/types";
-import type { HealthStatus } from "@/services/providers/types";
-import { providerManager } from "@/services/providers/manager";
-import { getApiKey } from "@/services/providers/keychain";
+import { useState } from "react"
+import { Trash2 } from "lucide-react"
+import type { ProviderConfig } from "@/types"
+import type { HealthStatus } from "@/services/providers/types"
+import { providerManager } from "@/services/providers/manager"
+import { useProviderStore } from "@/stores/provider"
 
 interface ProviderCardProps {
-  provider: ProviderConfig;
-  onDelete: (id: string) => void;
+  provider: ProviderConfig
+  onDelete: (id: string) => void
 }
 
 const PROVIDER_ICONS: Record<string, string> = {
   ollama: "🐙",
   deepseek: "⚡",
   qwen: "🔮",
-};
+  minimax: "🌊",
+}
 
 export function ProviderCard({ provider, onDelete }: ProviderCardProps) {
-  const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [checking, setChecking] = useState(false);
+  const { updateProvider } = useProviderStore()
+  const [health, setHealth] = useState<HealthStatus | null>(null)
+  const [checking, setChecking] = useState(false)
 
   async function checkHealth() {
-    setChecking(true);
-    setHealth(null);
+    setChecking(true)
+    setHealth(null)
     try {
-      const adapter = providerManager.fromConfig(provider);
-      const key =
-        provider.keychainAlias != null
-          ? await getApiKey(provider.keychainAlias).catch(() => "")
-          : "";
-      const result = await adapter.healthCheck(key);
-      setHealth(result);
+      // Rust fetches the API key from OS Keychain — no key needed here
+      const result = await providerManager.healthCheck(provider.id)
+      setHealth(result)
+
+      if (result.status === "connected") {
+        const models = await providerManager.listModels(provider.id).catch(() => [])
+        updateProvider(provider.id, {
+          isConnected: true,
+          ...(models.length > 0 ? { models } : {}),
+        })
+      }
     } catch {
-      setHealth({ status: "error", message: "Unexpected error" });
+      setHealth({ status: "error", message: "Unexpected error" })
     } finally {
-      setChecking(false);
+      setChecking(false)
     }
   }
 
-  const icon = PROVIDER_ICONS[provider.id] ?? "🌐";
-  const isConnected = health?.status === "connected" || provider.isConnected;
+  const icon = PROVIDER_ICONS[provider.id] ?? "🌐"
+  const isConnected = health?.status === "connected" || provider.isConnected
 
   return (
     <div className={`pcard${isConnected ? " live" : ""}`}>
@@ -55,6 +61,11 @@ export function ProviderCard({ provider, onDelete }: ProviderCardProps) {
                 ? `○ ${health.message}`
                 : "○ not checked"}
         </div>
+        {provider.defaultModel && (
+          <div className="pcard-model">
+            model: {provider.defaultModel}
+          </div>
+        )}
       </div>
       <span className={`p0 ${isConnected ? "live" : "offline"}`}>{provider.priority}</span>
       <button
@@ -85,5 +96,5 @@ export function ProviderCard({ provider, onDelete }: ProviderCardProps) {
         <Trash2 size={13} />
       </button>
     </div>
-  );
+  )
 }
