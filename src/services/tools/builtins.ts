@@ -65,6 +65,12 @@ export function registerBuiltins(): void {
     },
     async execute(args) {
       await invoke("write_file", { path: args.path, content: args.content })
+      // H3.1: Emit file:written for harness trigger routing
+      // workspaceId is not known at this scope — harness-engine listens broadly
+      eventBus.emit("file:written", {
+        workspaceId: "__any__",
+        filePath: args.path as string,
+      })
       return "File written successfully"
     },
   })

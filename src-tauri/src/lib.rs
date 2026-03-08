@@ -60,6 +60,9 @@ pub fn run() {
             commands::mcp::mcp_start,
             commands::mcp::mcp_invoke,
             commands::mcp::mcp_stop,
+            // memory
+            commands::memory::read_workspace_memory,
+            commands::memory::save_workspace_memory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

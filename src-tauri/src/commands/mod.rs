@@ -8,3 +8,4 @@ pub mod shell;
 pub mod skills;
 pub mod events;
 pub mod mcp;
+pub mod memory;

@@ -9,6 +9,7 @@ import type {
   AgentMessage,
   Message,
   ModelCapabilities,
+  ModelRef,
   ToolActivity,
   ToolDefinition,
 } from "@/types"
@@ -42,6 +43,12 @@ export interface AgentRunnerOptions {
    * Controls tool injection and system prompt adjustments.
    */
   modelCapabilities?: ModelCapabilities
+  /** H3.7: Per-phase model routing */
+  modelRouting?: {
+    planningModel?: ModelRef
+    executionModel?: ModelRef
+    verificationModel?: ModelRef
+  }
 }
 
 export interface AgentRunResult {
@@ -86,6 +93,7 @@ export async function runAgent(opts: AgentRunnerOptions): Promise<AgentRunResult
     extraExecutors: opts.extraExecutors,
     maxIterations: opts.maxIterations,
     signal: opts.signal,
+    modelRouting: opts.modelRouting,
     onChunk: opts.onChunk,
     onToolStart: opts.onToolStart,
     onToolEnd: opts.onToolEnd,

@@ -8,6 +8,9 @@ import type {
   TaskStatusEvent,
   TaskResultEvent,
   WorkspaceDeletedEvent,
+  FileWrittenEvent,
+  ToolCompletedEvent,
+  HarnessFeedbackEvent,
 } from "@/types"
 import { createLogger } from "./logger"
 
@@ -18,6 +21,9 @@ type BusEventMap = {
   "task:status": TaskStatusEvent
   "task:result": TaskResultEvent
   "workspace:deleted": WorkspaceDeletedEvent
+  "file:written": FileWrittenEvent
+  "tool:completed": ToolCompletedEvent
+  "harness:feedback": HarnessFeedbackEvent
 }
 
 type BusEventKey = keyof BusEventMap

@@ -40,6 +40,13 @@ export type WorkspaceStatus = "active" | "pending" | "idle"
 
 export type WorkspaceType = "internal" | "linked"
 
+export interface ModelRef {
+  providerId: string
+  modelId: string
+}
+
+export type TaskIntent = "read-only" | "mutation" | "analysis" | "full"
+
 export interface AgentConfig {
   providerId: string
   modelId: string
@@ -48,6 +55,12 @@ export interface AgentConfig {
   enableAgentLoop?: boolean
   /** Allowed tool names; undefined = all tools */
   tools?: string[]
+  /** Per-phase model routing: planning (iter 0), execution (iter 1+), verification */
+  planningModel?: ModelRef
+  executionModel?: ModelRef
+  verificationModel?: ModelRef
+  /** Restricts the action space by blocking certain tool categories */
+  taskIntent?: TaskIntent
 }
 
 export interface WorkspaceLayout {
@@ -82,6 +95,14 @@ export interface MCPSourceConfig {
   discoveredTools?: ToolDefinition[]
 }
 
+export interface HarnessTrigger {
+  event: "file_written" | "tool_completed" | "task_completed"
+  /** Glob pattern for file_written events */
+  pattern?: string
+  /** Tool name filter for tool_completed events */
+  toolName?: string
+}
+
 export interface AgentAppManifest {
   id: string
   name: string
@@ -109,6 +130,11 @@ export interface AgentAppManifest {
   lifecycle: {
     startup: "eager" | "lazy" | "on-trigger"
     persistence: "session" | "workspace" | "global"
+  }
+  /** Harness configuration: when to auto-run this app and feed results back to the agent */
+  harness?: {
+    triggers: HarnessTrigger[]
+    feedbackToAgent: boolean
   }
 }
 
@@ -291,6 +317,8 @@ export interface Skill {
   scope?: "global" | "workspace"
   createdAt: string
   updatedAt: string
+  /** Bound Agent App ID — ensures the corresponding app is connected when this skill is active */
+  boundAppId?: string
 }
 
 // ─── Tool Activity (UI state) ─────────────────────────────────
@@ -369,4 +397,21 @@ export interface TaskResultEvent {
 
 export interface WorkspaceDeletedEvent {
   workspaceId: string
+}
+
+export interface FileWrittenEvent {
+  workspaceId: string
+  filePath: string
+}
+
+export interface ToolCompletedEvent {
+  workspaceId: string
+  toolName: string
+  result: string
+}
+
+export interface HarnessFeedbackEvent {
+  workspaceId: string
+  appName: string
+  result: string
 }

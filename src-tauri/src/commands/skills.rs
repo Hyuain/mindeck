@@ -17,6 +17,9 @@ pub struct SkillRecord {
     pub tools: Option<Vec<String>>,
     pub created_at: String,
     pub updated_at: String,
+    /// Bound Agent App ID — connects the corresponding app when this skill is activated (H3.2)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bound_app_id: Option<String>,
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -147,6 +150,7 @@ fn parse_skill_md_minimal(content: &str, id: &str) -> SkillRecord {
         tools: None,
         created_at: now.clone(),
         updated_at: now,
+        bound_app_id: None,
     }
 }
 

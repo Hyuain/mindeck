@@ -1,0 +1,25 @@
+import type { AgentAppManifest } from "@/types"
+
+export const ESLINT_APP: AgentAppManifest = {
+  id: "native.eslint",
+  name: "ESLint",
+  version: "1.0.0",
+  description: "Runs ESLint on changed TypeScript/JavaScript files and reports issues.",
+  kind: "autonomous",
+  source: { type: "native", component: "EslintRunner" },
+  capabilities: { acceptsTasks: false },
+  toolExposure: "isolated",
+  permissions: {
+    filesystem: "workspace-only",
+    network: "none",
+    shell: true,
+  },
+  lifecycle: {
+    startup: "on-trigger",
+    persistence: "session",
+  },
+  harness: {
+    triggers: [{ event: "file_written", pattern: "**/*.{ts,tsx,js,jsx}" }],
+    feedbackToAgent: true,
+  },
+}

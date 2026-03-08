@@ -8,7 +8,7 @@
 import { runAgent, messagesToAgentHistory } from "./agent-runner"
 import { eventBus } from "./event-bus"
 import { appendMessage, makeMessage } from "./conversation"
-import { getToolDefinitions } from "./tools/registry"
+import { getToolDefinitions, filterByIntent } from "./tools/registry"
 import { createWorkspaceTools } from "./tools/workspace-tools"
 import { streamChat } from "./providers/bridge"
 import { createLogger } from "./logger"
@@ -19,10 +19,17 @@ import { resolveContentRoot } from "@/components/workspace/WorkspacePanel"
 import { discoverWorkspaceSkills, loadFullSkill } from "./skills/skill-discovery"
 import { discoverContextRules, buildContextSection } from "./skills/context-injector"
 import { mcpManager } from "./mcp/manager"
+import { harnessEngine } from "./harness-engine"
+import { readWorkspaceMemory, appendToWorkspaceMemory } from "./workspace-memory"
+import { ESLINT_APP } from "./native-apps/eslint-app"
+import { TSC_APP } from "./native-apps/tsc-app"
+import { TEST_RUNNER_APP } from "./native-apps/test-runner-app"
 import { useWorkspaceStore } from "@/stores/workspace"
+import { useAgentAppsStore } from "@/stores/agent-apps"
 import { useTaskStore } from "@/stores/tasks"
 import { useSkillsStore } from "@/stores/skills"
 import type {
+  AgentAppManifest,
   AgentMessage,
   Message,
   MessageSource,
@@ -104,6 +111,10 @@ export class WorkspaceAgent {
   private unsubscribeDispatch: (() => void) | null = null
   private callbacks: UICallbacks = {}
   private abortController = new AbortController()
+  /** H3.6: Cross-session memory injected into system prompt */
+  private memory = ""
+  /** H3.1: Pending harness feedback messages to drain on next process() */
+  private pendingHarnessFeedback: Array<{ appName: string; result: string }> = []
 
   constructor(
     private workspace: Workspace,
@@ -124,7 +135,7 @@ export class WorkspaceAgent {
   }
 
   /** Start listening for Majordomo dispatches targeting this workspace */
-  connect(): void {
+  async connect(): Promise<void> {
     this.unsubscribeDispatch?.()
     this.unsubscribeDispatch = eventBus.on("task:dispatch", (event) => {
       this.log.debug("task:dispatch received", { target: event.targetWorkspaceId })
@@ -145,7 +156,6 @@ export class WorkspaceAgent {
     })
 
     // Recover any tasks that were pending when this agent wasn't connected
-    // (EventBus event was missed — e.g. timing race or app restart)
     const pending = recoverPendingTasks(this.workspaceId)
     for (const task of pending) {
       this.log.info("Recovering pending task", { taskId: task.id })
@@ -157,11 +167,10 @@ export class WorkspaceAgent {
       })
     }
 
-    // Recover missed events from disk (survives app restarts — best-effort)
+    // Recover missed events from disk
     loadPendingDispatches(this.workspaceId)
       .then((events) => {
         for (const ev of events) {
-          // Skip if TaskStore already knows about this task (picked up via memory recovery above)
           const alreadyKnown = useTaskStore.getState().tasks.some((t) => t.id === ev.id)
           if (!alreadyKnown) {
             this.log.info("Recovering missed event from disk", { eventId: ev.id })
@@ -171,13 +180,22 @@ export class WorkspaceAgent {
               dispatchId: ev.id,
             })
           }
-          // Mark processed regardless to prevent future double-pickup
           markEventProcessed(this.workspaceId, ev.id).catch(() => {})
         }
       })
       .catch((err: unknown) =>
         this.log.warn("Failed to load pending events from disk", err)
       )
+
+    // H3.6: Load cross-session memory (non-blocking)
+    readWorkspaceMemory(this.workspaceId)
+      .then((mem) => {
+        this.memory = mem
+        if (mem) {
+          this.log.debug("Loaded workspace memory", { chars: mem.length })
+        }
+      })
+      .catch(() => {})
 
     // Discover workspace skills (non-blocking; best-effort)
     this.initWorkspaceContext().catch((err: unknown) =>
@@ -191,6 +209,14 @@ export class WorkspaceAgent {
         .connectWorkspaceDeps(this.workspaceId, deps)
         .catch((err: unknown) => this.log.warn("MCP dependency connection failed", err))
     }
+
+    // H3.2: Connect MCPs for skills with boundAppId (non-blocking)
+    this.connectBoundSkillApps().catch((err: unknown) =>
+      this.log.warn("Bound skill app connection failed", err)
+    )
+
+    // H3.1: Start harness engine with native apps + workspace apps
+    this.startHarness()
   }
 
   /** Stop listening for dispatches */
@@ -199,6 +225,7 @@ export class WorkspaceAgent {
     this.unsubscribeDispatch = null
     this.abortController.abort()
     this.abortController = new AbortController()
+    harnessEngine.stop(this.workspaceId)
     mcpManager.disconnectWorkspace(this.workspaceId).catch(() => {})
   }
 
@@ -210,6 +237,15 @@ export class WorkspaceAgent {
   /** Update workspace config (e.g. after model change) */
   updateConfig(workspace: Workspace): void {
     this.workspace = workspace
+  }
+
+  /**
+   * H3.1: Called by HarnessEngine when an app produces feedback.
+   * The message is injected into the conversation context on the next process() call.
+   */
+  injectHarnessFeedback(appName: string, result: string): void {
+    this.pendingHarnessFeedback.push({ appName, result })
+    this.log.debug("harness feedback queued", { appName, chars: result.length })
   }
 
   private enqueue(
@@ -278,6 +314,21 @@ export class WorkspaceAgent {
 
     // Resolve the model's capability profile — drives tool injection and prompt tuning.
     const modelCapabilities = resolveModelCapabilities(provider, modelId)
+
+    // H3.1: Drain pending harness feedback into conversation before user message
+    if (this.pendingHarnessFeedback.length > 0) {
+      const feedbackBatch = this.pendingHarnessFeedback.splice(0)
+      for (const fb of feedbackBatch) {
+        const feedbackMsg: Message = {
+          ...makeMessage("user", `[Harness: ${fb.appName}]\n${fb.result}`),
+          metadata: { source: "system" as MessageSource },
+        }
+        this.deps.appendMessage(this.workspaceId, feedbackMsg)
+        appendMessage(this.workspaceId, feedbackMsg).catch((err: unknown) =>
+          this.log.warn("Failed to persist harness feedback message", err)
+        )
+      }
+    }
 
     // 1. Build and persist user message with source metadata
     const userMsg: Message = {
@@ -355,7 +406,14 @@ export class WorkspaceAgent {
         // Merge MCP tools into definitions and executors
         const mcpTools = mcpManager.getToolsForWorkspace(this.workspaceId)
         const mcpExecutors = mcpManager.getExecutorsForWorkspace(this.workspaceId)
-        const allToolDefs = [...toolDefs, ...mcpTools]
+        const mergedDefs = [...toolDefs, ...mcpTools]
+
+        // H3.8: Apply dynamic action space filtering based on taskIntent
+        const taskIntent = workspace.agentConfig.taskIntent
+        const allToolDefs = taskIntent
+          ? filterByIntent(mergedDefs, taskIntent)
+          : mergedDefs
+
         const allExecutors = new Map([...wsTools.executors, ...mcpExecutors])
 
         // Apply sandbox restrictions
@@ -372,6 +430,11 @@ export class WorkspaceAgent {
           tools: allToolDefs,
           extraExecutors: finalExecutors,
           modelCapabilities,
+          modelRouting: {
+            planningModel: workspace.agentConfig.planningModel,
+            executionModel: workspace.agentConfig.executionModel,
+            verificationModel: workspace.agentConfig.verificationModel,
+          },
           signal: this.abortController.signal,
           onChunk: (delta) => {
             fullContent += delta
@@ -382,6 +445,13 @@ export class WorkspaceAgent {
           onToolEnd: this.callbacks.onToolEnd ?? (() => {}),
         })
         setPermissionContext(undefined)
+        // H3.6: Persist memory if tools were called
+        if (loopResult.toolsCalled.length > 0 && fullContent.trim()) {
+          const summary = fullContent.slice(0, 300)
+          appendToWorkspaceMemory(this.workspaceId, summary, providerId, modelId).catch(
+            (err: unknown) => this.log.warn("Failed to append workspace memory", err)
+          )
+        }
         // The loop may return text even if onChunk was never called
         // (e.g. max-iterations fallback message or tool-only response).
         if (!fullContent.trim() && loopResult.text.trim()) {
@@ -620,6 +690,11 @@ ${workspace.sandboxMode === "read-only" ? "\n⚠️ SANDBOX: This workspace is i
     // ─── Context injection ────────────────────────────────────────
     const sections: string[] = [basePrompt]
 
+    // H3.6: Inject cross-session memory
+    if (this.memory.trim()) {
+      sections.push(`## Memory\n\n${this.memory}`)
+    }
+
     // Inject all project context rules (AGENTS.md, CLAUDE.md, .cursorrules, .windsurfrules, etc.)
     try {
       const contextRules = await discoverContextRules(contentRoot)
@@ -660,5 +735,68 @@ ${workspace.sandboxMode === "read-only" ? "\n⚠️ SANDBOX: This workspace is i
     }
 
     return sections.join("\n\n")
+  }
+
+  /**
+   * H3.1: Start harness engine with native apps (if workspace has repoPath)
+   * and any Agent App manifests registered for this workspace.
+   */
+  private startHarness(): void {
+    const repoPath = this.workspace.repoPath
+    const workspaceRoot = repoPath ?? `~/.mindeck/workspaces/${this.workspaceId}/files`
+
+    // Collect workspace apps from agent-apps store
+    const appsStore = useAgentAppsStore.getState()
+    const wsApps: AgentAppManifest[] = appsStore.workspaceApps[this.workspaceId] ?? []
+
+    // Prepend native apps if workspace has a repo path
+    const nativeApps: AgentAppManifest[] = repoPath
+      ? [ESLINT_APP, TSC_APP, TEST_RUNNER_APP]
+      : []
+
+    const allApps = [...nativeApps, ...wsApps]
+    harnessEngine.start(this.workspaceId, allApps, { workspaceRoot }, this)
+  }
+
+  /**
+   * H3.2: For each active skill with a boundAppId, ensure the corresponding
+   * Agent App's MCP dependency is connected.
+   */
+  private async connectBoundSkillApps(): Promise<void> {
+    const skillsStore = useSkillsStore.getState()
+    const activeSkills = skillsStore.getWorkspaceActiveSkills(this.workspaceId)
+    const boundIds = activeSkills
+      .map((s) => s.boundAppId)
+      .filter((id): id is string => Boolean(id))
+
+    if (boundIds.length === 0) return
+
+    const appsStore = useAgentAppsStore.getState()
+    // Search across all workspace apps to find the manifest by ID
+    const allApps = Object.values(appsStore.workspaceApps).flat()
+
+    for (const appId of boundIds) {
+      const manifest = allApps.find((a) => a.id === appId)
+      if (!manifest) {
+        this.log.warn("Bound app not found for skill", { appId })
+        continue
+      }
+      if (manifest.source.type === "mcp" && manifest.source.config) {
+        const dep = {
+          name: appId,
+          transport: manifest.source.config.transport,
+          command: manifest.source.config.command,
+          args: manifest.source.config.args,
+          env: manifest.source.config.env,
+          url: manifest.source.config.url,
+        }
+        this.log.debug("Connecting bound skill MCP dep", { appId })
+        await mcpManager
+          .connectWorkspaceDeps(this.workspaceId, [dep])
+          .catch((err: unknown) =>
+            this.log.warn("Failed to connect bound skill MCP dep", { appId, err })
+          )
+      }
+    }
   }
 }
