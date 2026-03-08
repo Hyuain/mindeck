@@ -1,9 +1,12 @@
 mod commands;
 mod error;
 
+use commands::mcp::McpProcessRegistry;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(McpProcessRegistry::new())
         .setup(|_app| Ok(()))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -53,6 +56,10 @@ pub fn run() {
             commands::events::append_event,
             commands::events::load_pending_events,
             commands::events::mark_event_processed,
+            // mcp
+            commands::mcp::mcp_start,
+            commands::mcp::mcp_invoke,
+            commands::mcp::mcp_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

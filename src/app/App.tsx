@@ -30,6 +30,7 @@ import { AgentsPanel } from "@/components/agents/AgentsPanel"
 import { ProviderSettings } from "@/components/provider/ProviderSettings"
 import { CommandPalette } from "@/components/majordomo/CommandPalette"
 import { LayoutToggle } from "@/components/ui/LayoutToggle"
+import { AgentAppPane } from "@/components/workspace/AgentAppPane"
 import type { RenderableContent, Skill } from "@/types"
 
 export default function App() {
@@ -254,6 +255,16 @@ export default function App() {
         if (!activeWorkspace) return null
         const content = previewMap[pane.id]
         return content ? <PreviewPanel content={content} onClose={onClose} /> : null
+      }
+
+      if (pane.type === "agent-app") {
+        const workspace = pane.workspaceId
+          ? workspaces.find((ws) => ws.id === pane.workspaceId)
+          : activeWorkspace
+        if (!workspace) return null
+        return (
+          <AgentAppPane appId={pane.appId} workspaceId={workspace.id} onClose={onClose} />
+        )
       }
 
       return null

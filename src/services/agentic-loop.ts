@@ -5,11 +5,13 @@
 import { streamChat } from "./providers/bridge"
 import { executeTool, getToolDefinitions } from "./tools/registry"
 import { createLogger } from "./logger"
+import { estimateTokens, compactHistory } from "./context-compaction"
 import type { AgentMessage, ToolCall, ToolActivity, ToolDefinition } from "@/types"
 
 const log = createLogger("AgenticLoop")
 
 const DEFAULT_MAX_ITERATIONS = 25
+const TOKEN_THRESHOLD = 100_000
 
 export interface AgentLoopResult {
   text: string
@@ -205,6 +207,12 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
         workingHistory = [...workingHistory, toolTurn]
         intermediateMessages.push(toolTurn)
       }
+    }
+
+    // Compact history if we're approaching token limits
+    if (estimateTokens(workingHistory) > TOKEN_THRESHOLD) {
+      log.debug("compacting history", { estimatedTokens: estimateTokens(workingHistory) })
+      workingHistory = compactHistory(workingHistory, "", { keepRecentTurns: 10 })
     }
   }
 

@@ -18,6 +18,7 @@ import { setPermissionContext } from "./permissions"
 import { resolveContentRoot } from "@/components/workspace/WorkspacePanel"
 import { discoverWorkspaceSkills, loadFullSkill } from "./skills/skill-discovery"
 import { discoverContextRules, buildContextSection } from "./skills/context-injector"
+import { mcpManager } from "./mcp/manager"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useTaskStore } from "@/stores/tasks"
 import { useSkillsStore } from "@/stores/skills"
@@ -27,6 +28,7 @@ import type {
   MessageSource,
   ModelCapabilities,
   ProviderConfig,
+  SandboxMode,
   ToolActivity,
   Workspace,
 } from "@/types"
@@ -63,6 +65,27 @@ interface QueuedInput {
 // Workspace agents must NOT dispatch to other workspaces —
 // only Majordomo orchestrates cross-workspace delegation.
 const WORKSPACE_BLOCKED_TOOLS = ["dispatch_to_workspace"]
+
+const SANDBOX_READ_ONLY_BLOCKED = new Set(["bash_exec", "write_file", "delete_path"])
+
+type ToolExecutorMap = Map<string, (args: Record<string, unknown>) => Promise<unknown>>
+
+/**
+ * Wrap mutation tools with a blocking error when workspace is read-only.
+ */
+function sandboxExtraExecutors(
+  executors: ToolExecutorMap,
+  mode: SandboxMode
+): ToolExecutorMap {
+  if (mode !== "read-only") return executors
+  const wrapped = new Map(executors)
+  for (const name of SANDBOX_READ_ONLY_BLOCKED) {
+    wrapped.set(name, async () => {
+      throw new Error(`Tool '${name}' is blocked in read-only sandbox mode`)
+    })
+  }
+  return wrapped
+}
 
 /** Resolve the capability profile for the model the workspace is using. */
 function resolveModelCapabilities(
@@ -160,6 +183,14 @@ export class WorkspaceAgent {
     this.initWorkspaceContext().catch((err: unknown) =>
       this.log.warn("Workspace context discovery failed", err)
     )
+
+    // Connect MCP dependencies (non-blocking; best-effort)
+    const deps = this.workspace.mcpDependencies ?? []
+    if (deps.length > 0) {
+      mcpManager
+        .connectWorkspaceDeps(this.workspaceId, deps)
+        .catch((err: unknown) => this.log.warn("MCP dependency connection failed", err))
+    }
   }
 
   /** Stop listening for dispatches */
@@ -168,6 +199,7 @@ export class WorkspaceAgent {
     this.unsubscribeDispatch = null
     this.abortController.abort()
     this.abortController = new AbortController()
+    mcpManager.disconnectWorkspace(this.workspaceId).catch(() => {})
   }
 
   /** Accept user input (called by ChatPanel on send) */
@@ -319,6 +351,17 @@ export class WorkspaceAgent {
           ),
           ...wsTools.definitions,
         ]
+
+        // Merge MCP tools into definitions and executors
+        const mcpTools = mcpManager.getToolsForWorkspace(this.workspaceId)
+        const mcpExecutors = mcpManager.getExecutorsForWorkspace(this.workspaceId)
+        const allToolDefs = [...toolDefs, ...mcpTools]
+        const allExecutors = new Map([...wsTools.executors, ...mcpExecutors])
+
+        // Apply sandbox restrictions
+        const sandboxMode = workspace.sandboxMode ?? "full"
+        const finalExecutors = sandboxExtraExecutors(allExecutors, sandboxMode)
+
         setPermissionContext(workspace.name)
         loopResult = await runAgent({
           providerId,
@@ -326,8 +369,8 @@ export class WorkspaceAgent {
           modelId,
           systemPrompt,
           history,
-          tools: toolDefs,
-          extraExecutors: wsTools.executors,
+          tools: allToolDefs,
+          extraExecutors: finalExecutors,
           modelCapabilities,
           signal: this.abortController.signal,
           onChunk: (delta) => {
@@ -571,7 +614,8 @@ CRITICAL RULES — EVERY TURN IS AUDITED:
 4. If you need to move files, use bash_exec with "mv" command. If you need to check directory contents, call list_dir — do NOT guess or assume.
 5. Only report success AFTER tool results confirm the operation completed.
 ${majordomoInstructions}
-${userPrompt ? `\nAdditional instructions:\n${userPrompt}` : ""}`.trim()
+${userPrompt ? `\nAdditional instructions:\n${userPrompt}` : ""}
+${workspace.sandboxMode === "read-only" ? "\n⚠️ SANDBOX: This workspace is in read-only mode. File mutation tools (bash_exec, write_file, delete_path) are blocked." : ""}`.trim()
 
     // ─── Context injection ────────────────────────────────────────
     const sections: string[] = [basePrompt]
@@ -584,6 +628,13 @@ ${userPrompt ? `\nAdditional instructions:\n${userPrompt}` : ""}`.trim()
       }
     } catch {
       // Discovery failure is non-fatal
+    }
+
+    // List MCP tools available to the agent
+    const mcpTools = mcpManager.getToolsForWorkspace(this.workspaceId)
+    if (mcpTools.length > 0) {
+      const mcpLines = mcpTools.map((t) => `- ${t.name}: ${t.description}`).join("\n")
+      sections.push(`## MCP Tools\n\n${mcpLines}`)
     }
 
     // List active workspace skills — agent calls load_skill to get full content

@@ -4,10 +4,11 @@ import type { PaneNode } from "@/components/workspace/FlexibleWorkspace"
 
 export interface SerializedPane {
   id: string
-  type: "agent" | "file"
+  type: "agent" | "file" | "agent-app"
   title: string
   workspaceId?: string
   filePath?: string
+  appId?: string
 }
 
 export interface SerializedWorkspaceLayout {

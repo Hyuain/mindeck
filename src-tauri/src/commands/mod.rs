@@ -7,3 +7,4 @@ pub mod files;
 pub mod shell;
 pub mod skills;
 pub mod events;
+pub mod mcp;

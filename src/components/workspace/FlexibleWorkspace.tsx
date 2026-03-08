@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, type ReactNode } from "react"
 import { useDragState, type DropPosition } from "@/services/dragState"
 import { useLayoutStore, type SerializedPane } from "@/stores/layout"
 
-export type PaneType = "agent" | "file"
+export type PaneType = "agent" | "file" | "agent-app"
 
 export interface Pane {
   id: string
@@ -10,6 +10,7 @@ export interface Pane {
   title: string
   workspaceId?: string
   filePath?: string
+  appId?: string
   /** Optional pre-rendered content - if not provided, renderContent will be used */
   content?: ReactNode
 }

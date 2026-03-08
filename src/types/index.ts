@@ -55,6 +55,65 @@ export interface WorkspaceLayout {
   activeRendererId?: string
 }
 
+// ─── MCP / Agent Apps ────────────────────────────────────────
+
+export interface MCPDependency {
+  /** Namespace key e.g. "web-search" */
+  name: string
+  transport: "stdio" | "streamable-http"
+  /** stdio: "npx @mcp/server-web-search" */
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  /** HTTP transport URL */
+  url?: string
+  toolExposure?: "direct" | "namespaced"
+  // Runtime (not persisted)
+  status?: "connecting" | "connected" | "disconnected" | "error"
+  discoveredTools?: ToolDefinition[]
+}
+
+export interface MCPSourceConfig {
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  transport: "stdio" | "streamable-http"
+  url?: string
+  discoveredTools?: ToolDefinition[]
+}
+
+export interface AgentAppManifest {
+  id: string
+  name: string
+  version: string
+  description: string
+  icon?: string
+  kind: "orchestrator" | "tool-provider" | "autonomous" | "viewer"
+  source: { type: "mcp"; config: MCPSourceConfig } | { type: "native"; component: string }
+  capabilities: {
+    tools?: ToolDefinition[]
+    ui?: {
+      renderer:
+        | { type: "mcp-app"; resourceUri: string }
+        | { type: "native"; component: string }
+      minWidth?: number
+    }
+    acceptsTasks?: boolean
+  }
+  toolExposure: "direct" | "namespaced" | "isolated"
+  permissions: {
+    filesystem: "none" | "read" | "workspace-only" | "full"
+    network: "none" | "full"
+    shell: boolean
+  }
+  lifecycle: {
+    startup: "eager" | "lazy" | "on-trigger"
+    persistence: "session" | "workspace" | "global"
+  }
+}
+
+export type SandboxMode = "read-only" | "workspace-write" | "full"
+
 export interface Workspace {
   id: string
   name: string
@@ -69,6 +128,8 @@ export interface Workspace {
   stateSummary?: string
   status: WorkspaceStatus
   lastActivity?: string
+  mcpDependencies?: MCPDependency[]
+  sandboxMode?: SandboxMode
 }
 
 export interface FileNode {
