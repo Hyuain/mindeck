@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react"
-import { Files } from "lucide-react"
 import type { Workspace } from "@/types"
 import { FileExplorer } from "./FileExplorer"
 
@@ -16,12 +15,6 @@ export function WorkspacePanel({ workspace }: WorkspacePanelProps) {
 
   return (
     <div className="ws-panel">
-      <div className="ws-panel-tabs">
-        <button className="ws-panel-tab on">
-          <Files size={12} />
-          <span>Files</span>
-        </button>
-      </div>
       {contentRoot ? (
         <FileExplorer key={contentRoot} contentRoot={contentRoot} />
       ) : (

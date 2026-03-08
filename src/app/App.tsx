@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react"
-import { Settings } from "lucide-react"
+import { useEffect, useState, useCallback } from "react"
+import { Settings, Files, GitBranch, Bot } from "lucide-react"
+import { invoke } from "@tauri-apps/api/core"
 import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useProviderStore } from "@/stores/provider"
@@ -15,6 +16,8 @@ import { MajordomoPanel } from "@/components/majordomo/MajordomoPanel"
 import { ChatPanel } from "@/components/chat/ChatPanel"
 import { PreviewPanel } from "@/components/preview/PreviewPanel"
 import { WorkspacePanel } from "@/components/workspace/WorkspacePanel"
+import { FlexibleWorkspace, type Pane } from "@/components/workspace/FlexibleWorkspace"
+import { AgentsPanel } from "@/components/agents/AgentsPanel"
 import { ProviderSettings } from "@/components/provider/ProviderSettings"
 import { CommandPalette } from "@/components/majordomo/CommandPalette"
 import type { RenderableContent } from "@/types"
@@ -32,13 +35,16 @@ export default function App() {
   const { setSkills } = useSkillsStore()
   const { setMessages: setMajordomoMessages } = useMajordomoStore()
 
-  // Preview content keyed by workspace id
+  // Right panel tab state: "files" | "git"
+  const [rightPanelTab, setRightPanelTab] = useState<"files" | "git">("files")
+
+  // Flexible workspace panes
+  const [workspacePanes, setWorkspacePanes] = useState<Pane[]>([])
+
+  // Preview content keyed by pane id
   const [previewMap, setPreviewMap] = useState<Record<string, RenderableContent>>({})
 
   const activeWorkspace = workspaces.find((ws) => ws.id === activeWorkspaceId)
-  const previewContent = activeWorkspaceId
-    ? (previewMap[activeWorkspaceId] ?? null)
-    : null
 
   // Bootstrap on mount
   useEffect(() => {
@@ -106,12 +112,69 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [openSettings, openCommandPalette])
 
-  function handlePreview(workspaceId: string, content: string) {
+  // Handle pane changes in flexible workspace
+  function handlePanesChange(panes: Pane[]) {
+    setWorkspacePanes(panes)
+  }
+
+  // Load file content when file pane is added
+  useEffect(() => {
+    workspacePanes.forEach(async (pane) => {
+      if (pane.type === "file" && pane.filePath && !previewMap[pane.id]) {
+        try {
+          const content = await invoke<string>("read_file", { path: pane.filePath })
+          // Determine renderer type based on file extension
+          const ext = pane.filePath.split(".").pop()?.toLowerCase()
+          let rendererType: "markdown" | "code" | "image" | "raw" = "raw"
+          if (ext === "md" || ext === "markdown") {
+            rendererType = "markdown"
+          } else if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext || "")) {
+            rendererType = "image"
+          } else if (ext) {
+            rendererType = "code"
+          }
+          setPreviewMap((prev) => ({
+            ...prev,
+            [pane.id]: { type: rendererType, content, language: ext },
+          }))
+        } catch (err) {
+          console.error("Failed to load file:", err)
+        }
+      }
+    })
+  }, [workspacePanes])
+
+  // Handle preview for a pane
+  function handlePreview(paneId: string, content: string) {
     setPreviewMap((prev) => ({
       ...prev,
-      [workspaceId]: { type: "markdown", content },
+      [paneId]: { type: "markdown", content },
     }))
   }
+
+  // Render content for a pane based on its type
+  const renderPaneContent = useCallback(
+    (pane: Pane): React.ReactNode => {
+      if (!activeWorkspace) return null
+
+      if (pane.type === "agent") {
+        return (
+          <ChatPanel
+            workspace={activeWorkspace}
+            onPreview={(content) => handlePreview(pane.id, content)}
+          />
+        )
+      }
+
+      if (pane.type === "file") {
+        const content = previewMap[pane.id]
+        return content ? <PreviewPanel content={content} /> : null
+      }
+
+      return null
+    },
+    [activeWorkspace, previewMap]
+  )
 
   return (
     <div className="app">
@@ -155,25 +218,62 @@ export default function App() {
         {/* Column 1: Majordomo (permanent) */}
         <MajordomoPanel />
 
-        {/* Column 2+3: Workspace area */}
-        <div className="workspace-area">
-          {activeWorkspace ? (
-            <>
-              <ChatPanel
-                workspace={activeWorkspace}
-                onPreview={(content) => handlePreview(activeWorkspace.id, content)}
-              />
-              <div className="split" />
-              <PreviewPanel content={previewContent} />
-              <div className="split" />
-              <WorkspacePanel workspace={activeWorkspace} />
-            </>
-          ) : (
-            <div className="workspace-empty">
-              <p>Create a workspace to get started.</p>
+        {/* Column 2: Flexible Workspace (middle) */}
+        {activeWorkspace ? (
+          <FlexibleWorkspace
+            initialPanes={workspacePanes}
+            onPanesChange={handlePanesChange}
+            renderContent={renderPaneContent}
+          />
+        ) : (
+          <div className="workspace-empty">
+            <p>Create a workspace to get started.</p>
+          </div>
+        )}
+
+        {/* Column 3: Right Panel (Files/Git tabs + Agents) */}
+        {activeWorkspace && (
+          <div className="right-panel">
+            {/* Top: File tabs (Files, Git, etc.) - 70% */}
+            <div className="right-panel-top">
+              <div className="right-panel-tabs">
+                <button
+                  className={`right-panel-tab ${rightPanelTab === "files" ? "on" : ""}`}
+                  onClick={() => setRightPanelTab("files")}
+                >
+                  <Files size={12} />
+                  <span>Files</span>
+                </button>
+                <button
+                  className={`right-panel-tab ${rightPanelTab === "git" ? "on" : ""}`}
+                  onClick={() => setRightPanelTab("git")}
+                >
+                  <GitBranch size={12} />
+                  <span>Git</span>
+                </button>
+              </div>
+              <div className="right-panel-content">
+                {rightPanelTab === "files" && (
+                  <WorkspacePanel workspace={activeWorkspace} />
+                )}
+                {rightPanelTab === "git" && (
+                  <div className="right-panel-placeholder">
+                    Git integration coming soon
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-        </div>
+
+            {/* Bottom: Agents panel - 30% */}
+            <div className="right-panel-bottom">
+              <div className="right-panel-bottom-header">
+                <Bot size={12} />
+                <span>Agents</span>
+              </div>
+              <AgentsPanel />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── OVERLAYS ── */}
