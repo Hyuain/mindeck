@@ -4,6 +4,9 @@
  */
 
 import type { TaskDispatchEvent, TaskStatusEvent, TaskResultEvent } from "@/types"
+import { createLogger } from "./logger"
+
+const log = createLogger("EventBus")
 
 type BusEventMap = {
   "task:dispatch": TaskDispatchEvent
@@ -36,9 +39,14 @@ class TypedEventBus {
     if (!listeners) return
     for (const listener of listeners) {
       try {
-        listener(data)
+        const result = listener(data) as unknown
+        if (result instanceof Promise) {
+          result.catch((err: unknown) =>
+            log.error(`Async error in listener for "${event}"`, err)
+          )
+        }
       } catch (err) {
-        console.error(`[EventBus] Error in listener for "${event}":`, err)
+        log.error(`Error in listener for "${event}"`, err)
       }
     }
   }

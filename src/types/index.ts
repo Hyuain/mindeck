@@ -189,6 +189,37 @@ export interface ToolActivity {
   subAgent?: string
 }
 
+export interface PermissionRequest {
+  id: string
+  type: string
+  label: string
+  details: string
+  requestedAt: string
+  /** Workspace or agent name that triggered this permission request */
+  requestedBy?: string
+}
+
+// ─── Task Management ─────────────────────────────────────────
+
+export type TaskStatus = "pending" | "received" | "processing" | "completed" | "failed"
+
+export interface Task {
+  /** Doubles as dispatchId — used for EventBus correlation */
+  id: string
+  workspaceId: string
+  workspaceName: string
+  content: string
+  status: TaskStatus
+  sourceType: MessageSource
+  createdAt: number
+  updatedAt: number
+  /** How many times this task has been attempted (starts at 1) */
+  attempts: number
+  maxAttempts: number
+  result?: string
+  error?: string
+}
+
 // ─── Event Bus Events ────────────────────────────────────────
 
 export interface TaskDispatchEvent {

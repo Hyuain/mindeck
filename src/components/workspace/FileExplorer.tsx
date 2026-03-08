@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { invoke } from "@tauri-apps/api/core"
-import { FilePlus, FolderPlus } from "lucide-react"
+import { FilePlus, FolderPlus, RefreshCw } from "lucide-react"
 import type { FileNode } from "@/types"
 import { FileTree } from "./FileTree"
 
@@ -25,11 +25,31 @@ export function FileExplorer({ contentRoot }: FileExplorerProps) {
     }
   }
 
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      await loadDir(contentRoot)
+      // Reload all currently expanded subdirectories
+      await Promise.all(
+        [...expanded].filter((p) => p !== contentRoot).map((p) => loadDir(p))
+      )
+    } finally {
+      setLoading(false)
+    }
+  }, [contentRoot, expanded]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Load root on mount / when contentRoot changes
   useEffect(() => {
     setLoading(true)
     loadDir(contentRoot).finally(() => setLoading(false))
   }, [contentRoot]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-refresh when app window regains focus
+  useEffect(() => {
+    window.addEventListener("focus", refresh)
+    return () => window.removeEventListener("focus", refresh)
+  }, [refresh])
 
   async function handleToggle(node: FileNode) {
     if (!node.isDir) return
@@ -121,6 +141,14 @@ export function FileExplorer({ contentRoot }: FileExplorerProps) {
         </button>
         <button className="fe-tool-btn" onClick={handleCreateDir} title="New folder">
           <FolderPlus size={12} />
+        </button>
+        <button
+          className={`fe-tool-btn${loading ? " fe-refreshing" : ""}`}
+          onClick={refresh}
+          title="Refresh"
+          disabled={loading}
+        >
+          <RefreshCw size={12} />
         </button>
       </div>
       {loading && <div className="fe-status">Loading…</div>}

@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use tauri::command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FileNode {
     pub path: String,
     pub name: String,
@@ -119,4 +121,25 @@ pub fn write_file(path: String, content: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to create parent dirs for '{path}': {e}"))?;
     }
     fs::write(&path, content).map_err(|e| format!("Failed to write file '{path}': {e}"))
+}
+
+/// Append a batch of pre-formatted log lines to ~/.mindeck/logs/mindeck.log.
+/// Each line should already include a trailing newline.
+#[command]
+pub fn append_log_batch(lines: Vec<String>) -> Result<(), String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let log_dir = Path::new(&home).join(".mindeck").join("logs");
+    fs::create_dir_all(&log_dir)
+        .map_err(|e| format!("Failed to create log dir: {e}"))?;
+    let log_path = log_dir.join("mindeck.log");
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| format!("Failed to open log file: {e}"))?;
+    for line in &lines {
+        file.write_all(line.as_bytes())
+            .map_err(|e| format!("Failed to write log line: {e}"))?;
+    }
+    Ok(())
 }

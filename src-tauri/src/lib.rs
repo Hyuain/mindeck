@@ -41,6 +41,7 @@ pub fn run() {
             commands::files::create_dir_at,
             commands::files::delete_path,
             commands::files::pick_folder,
+            commands::files::append_log_batch,
             // shell
             commands::shell::bash_exec,
             // skills

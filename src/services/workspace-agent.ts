@@ -2,9 +2,7 @@
  * WorkspaceAgent — the main agent for a single workspace.
  *
  * Handles input from both user (via ChatPanel) and Majordomo (via event bus).
- * Runs the full agentic loop (tools, multi-turn) when enableAgentLoop is set.
- * Majordomo-dispatched tasks ALWAYS run the agentic loop so the agent can use
- * tools (list_dir, read_file, etc.) instead of asking for project info.
+ * Always runs the full agentic loop (tools, multi-turn) unless explicitly disabled.
  * Reports results back to Majordomo via event bus.
  */
 import { runAgentLoop } from "./agentic-loop"
@@ -13,6 +11,9 @@ import { appendMessage, makeMessage } from "./conversation"
 import { getToolDefinitions } from "./tools/registry"
 import { createWorkspaceTools } from "./tools/workspace-tools"
 import { streamChat } from "./providers/bridge"
+import { createLogger } from "./logger"
+import { updateTaskStatus, recoverPendingTasks } from "./task-manager"
+import { setPermissionContext } from "./permissions"
 import { resolveContentRoot } from "@/components/workspace/WorkspacePanel"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useChatStore } from "@/stores/chat"
@@ -25,6 +26,15 @@ import type {
   Workspace,
 } from "@/types"
 
+export interface UICallbacks {
+  onChunk?: (delta: string) => void
+  onToolStart?: (activity: ToolActivity) => void
+  onToolEnd?: (activity: ToolActivity) => void
+  onStreamingChange?: (isStreaming: boolean) => void
+  /** Called synchronously when a Majordomo dispatch is received, before processing */
+  onDispatchReceived?: (task: string) => void
+}
+
 export interface InputSource {
   type: MessageSource
   dispatchId?: string
@@ -35,80 +45,85 @@ interface QueuedInput {
   source: InputSource
 }
 
-interface WorkspaceAgentConfig {
-  workspace: Workspace
-  /** Signal to abort current processing */
-  signal?: AbortSignal
-  /** Callbacks to update UI */
-  onChunk: (delta: string) => void
-  onToolStart: (activity: ToolActivity) => void
-  onToolEnd: (activity: ToolActivity) => void
-  onStreamingChange: (isStreaming: boolean) => void
-  /** Called synchronously when a Majordomo dispatch is received, before processing */
-  onDispatchReceived?: (task: string) => void
-}
-
 // Workspace agents must NOT dispatch to other workspaces —
 // only Majordomo orchestrates cross-workspace delegation.
 const WORKSPACE_BLOCKED_TOOLS = ["dispatch_to_workspace"]
 
 export class WorkspaceAgent {
   private readonly workspaceId: string
+  private readonly log
   private queue: QueuedInput[] = []
   private processing = false
   private unsubscribeDispatch: (() => void) | null = null
-  private processedDispatchIds = new Set<string>()
+  private callbacks: UICallbacks = {}
+  private abortController = new AbortController()
 
-  constructor(private config: WorkspaceAgentConfig) {
-    this.workspaceId = config.workspace.id
+  constructor(private workspace: Workspace) {
+    this.workspaceId = workspace.id
+    this.log = createLogger(`WorkspaceAgent:${this.workspaceId}`)
+  }
+
+  /** Register UI callbacks from ChatPanel (called on mount). */
+  setCallbacks(cb: UICallbacks): void {
+    this.callbacks = cb
+  }
+
+  /** Remove UI callbacks (called on unmount). */
+  clearCallbacks(): void {
+    this.callbacks = {}
   }
 
   /** Start listening for Majordomo dispatches targeting this workspace */
   connect(): void {
     this.unsubscribeDispatch?.()
     this.unsubscribeDispatch = eventBus.on("task:dispatch", (event) => {
-      console.log(
-        `[WorkspaceAgent:${this.workspaceId}] task:dispatch received — target: ${event.targetWorkspaceId}`
-      )
+      this.log.debug("task:dispatch received", { target: event.targetWorkspaceId })
       if (event.targetWorkspaceId !== this.workspaceId) return
 
-      if (this.processedDispatchIds.has(event.id)) {
-        console.warn(
-          `[WorkspaceAgent:${this.workspaceId}] duplicate dispatch ignored: ${event.id}`
-        )
-        return
-      }
-      this.processedDispatchIds.add(event.id)
+      this.log.info("Dispatch matched — enqueueing task", { taskId: event.id })
 
-      console.log(
-        `[WorkspaceAgent:${this.workspaceId}] dispatch matched — enqueueing task`
-      )
+      // Mark received in TaskStore immediately (prevents recovery double-pickup)
+      updateTaskStatus(event.id, "received")
 
       // Immediate UI feedback before async processing starts
-      this.config.onDispatchReceived?.(event.task)
-
-      eventBus.emit("task:status", {
-        dispatchId: event.id,
-        workspaceId: this.workspaceId,
-        status: "received",
-      })
+      this.callbacks.onDispatchReceived?.(event.task)
 
       this.enqueue(event.task, {
         type: "majordomo",
         dispatchId: event.id,
       })
     })
+
+    // Recover any tasks that were pending when this agent wasn't connected
+    // (EventBus event was missed — e.g. timing race or app restart)
+    const pending = recoverPendingTasks(this.workspaceId)
+    for (const task of pending) {
+      this.log.info("Recovering pending task", { taskId: task.id })
+      updateTaskStatus(task.id, "received")
+      this.callbacks.onDispatchReceived?.(task.content)
+      this.enqueue(task.content, {
+        type: task.sourceType,
+        dispatchId: task.id,
+      })
+    }
   }
 
   /** Stop listening for dispatches */
   disconnect(): void {
     this.unsubscribeDispatch?.()
     this.unsubscribeDispatch = null
+    this.abortController.abort()
+    this.abortController = new AbortController()
   }
 
   /** Accept user input (called by ChatPanel on send) */
   send(content: string): void {
     this.enqueue(content, { type: "user" })
+  }
+
+  /** Update workspace config (e.g. after model change) */
+  updateConfig(workspace: Workspace): void {
+    this.workspace = workspace
   }
 
   private enqueue(content: string, source: InputSource): void {
@@ -125,7 +140,7 @@ export class WorkspaceAgent {
     try {
       await this.process(input.content, input.source)
     } catch (err: unknown) {
-      console.error("[WorkspaceAgent] Error during processing:", err)
+      this.log.error("Error during processing", err)
     } finally {
       this.processing = false
       const next = this.queue.shift()
@@ -135,14 +150,38 @@ export class WorkspaceAgent {
     }
   }
 
-  private async process(content: string, source: InputSource): Promise<void> {
-    const { workspace } = this.config
+  private async process(
+    content: string,
+    source: InputSource,
+    retryCount = 0
+  ): Promise<void> {
+    const workspace = this.workspace
     const {
       providerId,
       modelId,
       enableAgentLoop,
       tools: allowedTools,
     } = workspace.agentConfig
+
+    // Fix A: Validate provider before touching chat store or starting the LLM call
+    const providerExists = useProviderStore
+      .getState()
+      .providers.some((p) => p.id === providerId)
+    if (!providerId || !providerExists) {
+      this.log.error("No valid provider configured", {
+        providerId,
+        workspaceId: this.workspaceId,
+      })
+      if (source.dispatchId) {
+        eventBus.emit("task:result", {
+          dispatchId: source.dispatchId,
+          workspaceId: this.workspaceId,
+          result: `Error: Workspace "${workspace.name}" has no provider configured. Open Settings to add a model.`,
+          summary: "Provider not configured",
+        })
+      }
+      return
+    }
 
     // Look up providerType so MiniMax gets correct message formatting
     const providerType =
@@ -163,7 +202,9 @@ export class WorkspaceAgent {
       messages,
     } = useChatStore.getState()
     storeAppend(this.workspaceId, userMsg)
-    appendMessage(this.workspaceId, userMsg).catch(console.warn)
+    appendMessage(this.workspaceId, userMsg).catch((err: unknown) =>
+      this.log.warn("Failed to persist user message", err)
+    )
 
     // 2. Build system prompt (includes project path, tools, context)
     const systemPrompt = await this.buildSystemPrompt(source)
@@ -180,22 +221,26 @@ export class WorkspaceAgent {
     // 4. Placeholder AI message
     const aiMsg: Message = makeMessage("assistant", "", modelId, providerId)
     storeAppend(this.workspaceId, aiMsg)
-    this.config.onStreamingChange(true)
+    this.callbacks.onStreamingChange?.(true)
 
     let fullContent = ""
+    let loopResult: Awaited<ReturnType<typeof runAgentLoop>> | undefined
+
+    // Always use the agentic loop so the agent has tool access.
+    // Previously gated behind `enableAgentLoop` config, but user messages
+    // were silently losing all tool capabilities when unset.
+    const useAgentLoop = enableAgentLoop !== false
 
     try {
       if (source.dispatchId) {
-        eventBus.emit("task:status", {
-          dispatchId: source.dispatchId,
-          workspaceId: this.workspaceId,
-          status: "processing",
-        })
+        updateTaskStatus(source.dispatchId, "processing")
       }
-
-      // Majordomo dispatches always run the agentic loop so the agent can use
-      // tools (list_dir, read_file, etc.) rather than asking for project info.
-      const useAgentLoop = enableAgentLoop || source.type === "majordomo"
+      this.log.debug("process start", {
+        providerId,
+        modelId,
+        useAgentLoop,
+        source: source.type,
+      })
 
       if (useAgentLoop) {
         // Full agentic loop with tools (global builtins + workspace-specific tools)
@@ -205,8 +250,8 @@ export class WorkspaceAgent {
           modelId,
           workspaceId: this.workspaceId,
           workspaceName: workspace.name,
-          onSubAgentToolStart: this.config.onToolStart,
-          onSubAgentToolEnd: this.config.onToolEnd,
+          onSubAgentToolStart: this.callbacks.onToolStart ?? (() => {}),
+          onSubAgentToolEnd: this.callbacks.onToolEnd ?? (() => {}),
         })
         const toolDefs = [
           ...getToolDefinitions(allowedTools).filter(
@@ -214,22 +259,30 @@ export class WorkspaceAgent {
           ),
           ...wsTools.definitions,
         ]
-        await runAgentLoop({
+        setPermissionContext(workspace.name)
+        loopResult = await runAgentLoop({
           providerId,
           providerType,
           modelId,
           history,
           tools: toolDefs,
           extraExecutors: wsTools.executors,
-          signal: this.config.signal,
+          signal: this.abortController.signal,
           onChunk: (delta) => {
             fullContent += delta
             updateLastMessage(this.workspaceId, { content: fullContent })
-            this.config.onChunk(delta)
+            this.callbacks.onChunk?.(delta)
           },
-          onToolStart: this.config.onToolStart,
-          onToolEnd: this.config.onToolEnd,
+          onToolStart: this.callbacks.onToolStart ?? (() => {}),
+          onToolEnd: this.callbacks.onToolEnd ?? (() => {}),
         })
+        setPermissionContext(undefined)
+        // The loop may return text even if onChunk was never called
+        // (e.g. max-iterations fallback message or tool-only response).
+        if (!fullContent.trim() && loopResult.text.trim()) {
+          fullContent = loopResult.text
+          updateLastMessage(this.workspaceId, { content: fullContent })
+        }
       } else {
         // Simple streaming chat (no tools)
         for await (const chunk of streamChat(
@@ -238,13 +291,13 @@ export class WorkspaceAgent {
           modelId,
           history,
           undefined,
-          this.config.signal
+          this.abortController.signal
         )) {
-          if (this.config.signal?.aborted) break
+          if (this.abortController.signal.aborted) break
           if (chunk.delta) {
             fullContent += chunk.delta
             updateLastMessage(this.workspaceId, { content: fullContent })
-            this.config.onChunk(chunk.delta)
+            this.callbacks.onChunk?.(chunk.delta)
           }
         }
       }
@@ -252,21 +305,61 @@ export class WorkspaceAgent {
       const isAbort = (err as Error)?.name === "AbortError"
       if (!isAbort) {
         const errText = err instanceof Error ? err.message : "Unknown error"
-        console.error("[WorkspaceAgent] Stream error:", errText)
+        this.log.error("Stream error", { errText, providerId, modelId })
         updateLastMessage(this.workspaceId, { content: `Error: ${errText}` })
         fullContent = `Error: ${errText}`
       }
 
       if (source.dispatchId) {
-        eventBus.emit("task:status", {
-          dispatchId: source.dispatchId,
-          workspaceId: this.workspaceId,
-          status: "failed",
-          progress: fullContent,
-        })
+        updateTaskStatus(source.dispatchId, "failed", { error: fullContent })
       }
     } finally {
-      this.config.onStreamingChange(false)
+      this.callbacks.onStreamingChange?.(false)
+    }
+
+    // Detect fake actions: model describes file operations but never called tools
+    if (useAgentLoop && loopResult && retryCount < 1) {
+      const actionMentioned =
+        /移[入动]|已移|moved|已[创删复]|created|deleted|copied|mv |cp |mkdir |rm /i.test(
+          fullContent
+        )
+      const mutatingToolCalled = loopResult.toolsCalled.some((t) =>
+        ["bash_exec", "write_file", "delete_path"].includes(t)
+      )
+      if (actionMentioned && !mutatingToolCalled) {
+        this.log.warn(
+          "Fake action detected — model described mutations without calling tools",
+          {
+            toolsCalled: loopResult.toolsCalled,
+            contentPreview: fullContent.slice(0, 200),
+          }
+        )
+        // Inject correction and retry once
+        const correctionMsg: Message = {
+          ...makeMessage(
+            "user",
+            "⚠️ SYSTEM AUDIT: Your response described file operations (move/create/delete) but you did NOT call any tool to actually perform them. Text descriptions do NOT execute. You MUST call bash_exec, write_file, or delete_path to perform real operations. Try again — use the tools."
+          ),
+          metadata: { source: "system" as MessageSource },
+        }
+        storeAppend(this.workspaceId, correctionMsg)
+        appendMessage(this.workspaceId, correctionMsg).catch(console.warn)
+        // Retry the process with the correction injected into history
+        return this.process(correctionMsg.content, source, retryCount + 1)
+      }
+    }
+
+    // Fix B: Guard against empty fullContent — prevents silent empty results
+    if (!fullContent.trim()) {
+      this.log.warn("Agent returned empty response", {
+        providerId,
+        modelId,
+        useAgentLoop: enableAgentLoop !== false,
+        source: source.type,
+      })
+      fullContent =
+        "(No response generated. Workspace agent may have a provider configuration issue.)"
+      updateLastMessage(this.workspaceId, { content: fullContent })
     }
 
     // 5. Persist complete AI message
@@ -277,28 +370,29 @@ export class WorkspaceAgent {
         ...(source.dispatchId ? { dispatchId: source.dispatchId } : {}),
       },
     }
-    appendMessage(this.workspaceId, finalAiMsg).catch(console.warn)
+    appendMessage(this.workspaceId, finalAiMsg).catch((err: unknown) =>
+      this.log.warn("Failed to persist AI message", err)
+    )
 
-    // 6. Update workspace status
+    // 6. Update workspace status (remove "idle" — use TaskStore for status instead)
     useWorkspaceStore.getState().updateWorkspace(this.workspaceId, {
-      status: "idle",
       stateSummary: fullContent.slice(0, 200),
       updatedAt: new Date().toISOString(),
     })
 
-    // 7. Report result back to Majordomo if dispatched
+    // 7. Report result back to Majordomo and mark task completed
     if (source.dispatchId) {
+      this.log.info("task:result emitting", {
+        dispatchId: source.dispatchId,
+        workspaceId: this.workspaceId,
+        summaryLen: fullContent.length,
+      })
+      updateTaskStatus(source.dispatchId, "completed", { result: fullContent })
       eventBus.emit("task:result", {
         dispatchId: source.dispatchId,
         workspaceId: this.workspaceId,
         result: fullContent,
         summary: fullContent.slice(0, 200),
-      })
-
-      eventBus.emit("task:status", {
-        dispatchId: source.dispatchId,
-        workspaceId: this.workspaceId,
-        status: "completed",
       })
     }
   }
@@ -308,7 +402,7 @@ export class WorkspaceAgent {
    * project directory, and available tools.
    */
   private async buildSystemPrompt(source: InputSource): Promise<string> {
-    const { workspace } = this.config
+    const workspace = this.workspace
 
     // Use any explicitly configured system prompt as a base
     const userPrompt = workspace.agentConfig.systemPrompt ?? ""
@@ -347,12 +441,14 @@ You have access to these tools:
 - report_to_majordomo(workspaceId, summary, details): Report results back to Majordomo
 - spawn_sub_agent(name, task): Spawn a temporary sub-agent to handle a focused subtask. The sub-agent runs autonomously and returns its result to you.
 - spawn_sub_agent_team(agents): Spawn multiple sub-agents IN PARALLEL. Pass an array of {name, task} objects. All sub-agents run simultaneously and their results are returned together. Use this to parallelize independent subtasks (e.g. one sub-agent per topic, file, or software).
+
+CRITICAL RULES — EVERY TURN IS AUDITED:
+1. To perform ANY file operation (move, copy, create, delete, rename), you MUST call the appropriate tool (bash_exec, write_file, delete_path, etc.). Writing text about an action does NOT perform it.
+2. NEVER write "让我移动", "已移动", "files moved", "让我检查" and then produce a result summary WITHOUT having called the actual tool in between. Describing what you would do is NOT the same as doing it.
+3. After calling a tool, check the tool result to confirm it succeeded before reporting success.
+4. If you need to move files, use bash_exec with "mv" command. If you need to check directory contents, call list_dir — do NOT guess or assume.
+5. Only report success AFTER tool results confirm the operation completed.
 ${majordomoInstructions}
 ${userPrompt ? `\nAdditional instructions:\n${userPrompt}` : ""}`.trim()
-  }
-
-  /** Update the workspace config (e.g., after model change) */
-  updateConfig(workspace: Workspace): void {
-    this.config = { ...this.config, workspace }
   }
 }

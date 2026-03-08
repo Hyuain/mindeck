@@ -7,6 +7,7 @@ export interface DragPreview {
   type: "file" | "agent"
   title: string
   filePath?: string
+  workspaceId?: string
 }
 
 interface DragState {

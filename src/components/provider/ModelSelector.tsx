@@ -1,12 +1,12 @@
-import { useState } from "react";
-import { ChevronDown, Circle } from "lucide-react";
-import type { ProviderConfig, Model } from "@/types";
+import { useState } from "react"
+import { ChevronDown, Circle } from "lucide-react"
+import type { ProviderConfig, Model } from "@/types"
 
 interface ModelSelectorProps {
-  providers: ProviderConfig[];
-  selectedProviderId: string;
-  selectedModelId: string;
-  onChange: (providerId: string, modelId: string) => void;
+  providers: ProviderConfig[]
+  selectedProviderId: string
+  selectedModelId: string
+  onChange: (providerId: string, modelId: string) => void
 }
 
 export function ModelSelector({
@@ -15,17 +15,17 @@ export function ModelSelector({
   selectedModelId,
   onChange,
 }: ModelSelectorProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(false)
 
-  const activeProvider = providers.find((p) => p.id === selectedProviderId);
-  const activeModel = activeProvider?.models?.find((m) => m.id === selectedModelId);
+  const activeProvider = providers.find((p) => p.id === selectedProviderId)
+  const activeModel = activeProvider?.models?.find((m) => m.id === selectedModelId)
 
   const label = activeProvider
     ? `${activeProvider.name} · ${activeModel?.name ?? selectedModelId}`
-    : "Select model";
+    : "Select model"
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", flex: 1, minWidth: 0, overflow: "hidden" }}>
       <button
         className="model-sel"
         onClick={() => setOpen((v) => !v)}
@@ -65,8 +65,8 @@ export function ModelSelector({
                         : ""
                     }`}
                     onClick={() => {
-                      onChange(provider.id, model.id);
-                      setOpen(false);
+                      onChange(provider.id, model.id)
+                      setOpen(false)
                     }}
                   >
                     {model.name}
@@ -84,5 +84,5 @@ export function ModelSelector({
         </>
       )}
     </div>
-  );
+  )
 }

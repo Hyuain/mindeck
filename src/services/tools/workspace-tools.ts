@@ -5,7 +5,10 @@
  */
 import { runAgentLoop } from "../agentic-loop"
 import { getToolDefinitions } from "./registry"
+import { createLogger } from "../logger"
 import type { AgentMessage, ToolActivity, ToolDefinition } from "@/types"
+
+const log = createLogger("WorkspaceTools")
 
 export interface WorkspaceToolContext {
   providerId: string
@@ -33,8 +36,7 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): WorkspaceTools 
         properties: {
           name: {
             type: "string",
-            description:
-              "Short identifier for this sub-agent, e.g. 'blender-researcher'",
+            description: "Short identifier for this sub-agent, e.g. 'blender-researcher'",
           },
           task: {
             type: "string",
@@ -85,6 +87,10 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): WorkspaceTools 
 
   executors.set("spawn_sub_agent_team", async (args) => {
     const agents = args.agents as Array<{ name: string; task: string }>
+    log.info("spawning sub-agent team", {
+      count: agents.length,
+      names: agents.map((a) => a.name),
+    })
     const results = await Promise.all(
       agents.map(({ name, task }) => runSubAgent(name, task, ctx))
     )
@@ -102,6 +108,7 @@ async function runSubAgent(
   const subId = crypto.randomUUID()
 
   // Announce sub-agent start as a special top-level activity
+  log.info("sub-agent start", { name, taskPreview: task.slice(0, 80) })
   ctx.onSubAgentToolStart({
     id: subId,
     name: `[${name}]`,
@@ -129,7 +136,7 @@ async function runSubAgent(
 
   let result = ""
   try {
-    result = await runAgentLoop({
+    const loopResult = await runAgentLoop({
       providerId: ctx.providerId,
       providerType: ctx.providerType,
       modelId: ctx.modelId,
@@ -144,7 +151,9 @@ async function runSubAgent(
         ctx.onSubAgentToolEnd({ ...activity, subAgent: name })
       },
     })
+    result = loopResult.text
   } catch (err) {
+    log.error("sub-agent error", { name, err })
     result = `Sub-agent "${name}" failed: ${err instanceof Error ? err.message : String(err)}`
   }
 
@@ -159,5 +168,6 @@ async function runSubAgent(
     finishedAt: new Date().toISOString(),
   })
 
+  log.info("sub-agent done", { name })
   return result
 }

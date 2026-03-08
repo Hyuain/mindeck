@@ -4,9 +4,18 @@
  */
 import { streamChat } from "./providers/bridge"
 import { executeTool, getToolDefinitions } from "./tools/registry"
+import { createLogger } from "./logger"
 import type { AgentMessage, ToolCall, ToolActivity, ToolDefinition } from "@/types"
 
-const DEFAULT_MAX_ITERATIONS = 10
+const log = createLogger("AgenticLoop")
+
+const DEFAULT_MAX_ITERATIONS = 25
+
+export interface AgentLoopResult {
+  text: string
+  /** Names of tools that were actually executed during the loop */
+  toolsCalled: string[]
+}
 
 export interface AgentLoopOptions {
   providerId: string
@@ -46,7 +55,7 @@ function makeActivity(
   }
 }
 
-export async function runAgentLoop(opts: AgentLoopOptions): Promise<string> {
+export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
   const {
     providerId,
     providerType,
@@ -60,6 +69,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<string> {
 
   const tools = opts.tools ?? getToolDefinitions()
   let workingHistory: AgentMessage[] = [...opts.history]
+  const allToolsCalled: string[] = []
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     let accumText = ""
@@ -74,7 +84,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<string> {
       tools.length > 0 ? tools : undefined,
       signal
     )) {
-      if (signal?.aborted) return accumText
+      if (signal?.aborted) return { text: accumText, toolsCalled: allToolsCalled }
 
       if (chunk.delta) {
         accumText += chunk.delta
@@ -84,6 +94,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<string> {
       if (chunk.toolCallStart) {
         const { id, name } = chunk.toolCallStart
         pendingCalls.set(id, { name, argBuffer: "" })
+        log.debug("tool call start", { name, id })
         onToolStart(makeActivity({ id, name, arguments: {} }, "running"))
       }
 
@@ -113,6 +124,29 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<string> {
       }
     }
 
+    // Finalize any tool calls that were started but never got a toolCallEnd
+    // (can happen when the stream ends prematurely or the provider omits
+    // the end marker). Without this, pending calls are silently dropped and
+    // the loop exits thinking the model produced no tool calls.
+    if (pendingCalls.size > 0) {
+      log.warn("finalizing orphaned tool calls", {
+        count: pendingCalls.size,
+        names: [...pendingCalls.values()].map((p) => p.name),
+      })
+      for (const [id, pending] of pendingCalls) {
+        let parsedArgs: Record<string, unknown> = {}
+        try {
+          parsedArgs = JSON.parse(pending.argBuffer)
+        } catch {
+          if (pending.argBuffer.trim()) {
+            parsedArgs = { raw: pending.argBuffer }
+          }
+        }
+        completedCalls.push({ id, name: pending.name, arguments: parsedArgs })
+      }
+      pendingCalls.clear()
+    }
+
     // Append assistant turn
     const assistantTurn: AgentMessage = {
       role: "assistant",
@@ -123,21 +157,24 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<string> {
 
     // No tool calls — model is done
     if (completedCalls.length === 0) {
-      return accumText
+      return { text: accumText, toolsCalled: allToolsCalled }
     }
 
     // Execute all tool calls (extraExecutors take priority over global registry)
     const results = await Promise.allSettled(
       completedCalls.map(async (call) => {
+        allToolsCalled.push(call.name)
         try {
           const extraExec = opts.extraExecutors?.get(call.name)
           const result = extraExec
             ? await extraExec(call.arguments)
             : await executeTool(call.name, call.arguments)
+          log.debug("tool result", { name: call.name, ok: true })
           onToolEnd(makeActivity(call, "done", result))
           return { call, result, ok: true as const }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
+          log.warn("tool error", { name: call.name, error: msg })
           onToolEnd(makeActivity(call, "error", msg))
           return { call, result: msg, ok: false as const }
         }
@@ -159,5 +196,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<string> {
     }
   }
 
-  return `Reached maximum iterations (${maxIterations}). Last response may be incomplete.`
+  log.warn("max iterations reached", { iterations: maxIterations })
+  return {
+    text: `Reached maximum iterations (${maxIterations}). Last response may be incomplete.`,
+    toolsCalled: allToolsCalled,
+  }
 }

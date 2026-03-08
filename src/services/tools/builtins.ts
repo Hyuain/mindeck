@@ -5,7 +5,12 @@
 import { invoke } from "@tauri-apps/api/core"
 import { registerTool } from "./registry"
 import { eventBus } from "@/services/event-bus"
+import { createLogger } from "@/services/logger"
 import { useWorkspaceStore } from "@/stores/workspace"
+import { requestPermission } from "@/services/permissions"
+import { createTask } from "@/services/task-manager"
+
+const log = createLogger("builtins")
 
 export function registerBuiltins(): void {
   // ── list_dir ──────────────────────────────────────────────
@@ -116,10 +121,12 @@ export function registerBuiltins(): void {
       },
     },
     async execute(args) {
-      const confirmed = window.confirm(
-        `Majordomo wants to run a shell command:\n\n${args.command}\n\nAllow?`
+      const granted = await requestPermission(
+        "bash_exec",
+        "Run shell command",
+        args.command as string
       )
-      if (!confirmed) throw new Error("Execution cancelled by user")
+      if (!granted) throw new Error("Execution cancelled by user")
       return invoke("bash_exec", { command: args.command, cwd: args.cwd ?? null })
     },
   })
@@ -149,11 +156,14 @@ export function registerBuiltins(): void {
     definition: {
       name: "dispatch_to_workspace",
       description:
-        "Send a task to a specific workspace's main agent. Use this to delegate sub-tasks. Results are reported back ASYNCHRONOUSLY via report_to_majordomo — do NOT call this again for the same task. Use once per delegation.",
+        "Send a task to a specific workspace's agent. Use this to delegate sub-tasks to a workspace. Results are reported back asynchronously — you will receive them when the workspace agent completes.",
       parameters: {
         type: "object",
         properties: {
-          workspaceId: { type: "string", description: "The workspace ID to dispatch to" },
+          workspaceId: {
+            type: "string",
+            description: "The workspace ID or name to dispatch to",
+          },
           task: {
             type: "string",
             description: "The task or question to send to the workspace agent",
@@ -176,20 +186,28 @@ export function registerBuiltins(): void {
       const resolvedId = match?.id ?? input
 
       if (!match) {
-        console.warn(
-          `[dispatch_to_workspace] No workspace matched "${input}" — using as-is`
-        )
+        log.warn(`dispatch_to_workspace: no workspace matched "${input}" — using as-is`)
       }
 
-      const dispatchId = crypto.randomUUID()
+      // Create task in TaskStore first (engineering guarantee — not prompt-based)
+      const task = createTask(resolvedId, args.task as string, "majordomo")
+
+      log.info("dispatch_to_workspace", {
+        targetWorkspace: match?.name ?? resolvedId,
+        taskId: task.id,
+        content: (args.task as string).slice(0, 80),
+      })
+
+      // Notify agent via EventBus (real-time delivery; recovery via TaskStore if missed)
       eventBus.emit("task:dispatch", {
-        id: dispatchId,
+        id: task.id,
         sourceType: "majordomo",
         targetWorkspaceId: resolvedId,
         task: args.task as string,
         priority: "normal",
       })
-      return `Task dispatched to workspace "${match?.name ?? resolvedId}" (id: ${resolvedId}, dispatch: ${dispatchId})`
+
+      return `Task dispatched to "${match?.name ?? resolvedId}" (taskId: ${task.id})`
     },
   })
 

@@ -6,7 +6,7 @@ use keyring::Entry;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use tauri::ipc::Channel;
 
@@ -114,8 +114,8 @@ async fn stream_openai_sse(
             let data = &line[6..];
 
             if data == "[DONE]" {
-                for (_, (id, _)) in &tool_calls {
-                    let _ = on_event.send(StreamEvent::ToolCallEnd { id: id.clone() });
+                for (_, (id, _)) in tool_calls.drain() {
+                    let _ = on_event.send(StreamEvent::ToolCallEnd { id });
                 }
                 let _ = on_event.send(StreamEvent::Done);
                 return Ok(());
@@ -166,6 +166,10 @@ async fn stream_openai_sse(
         }
     }
 
+    // Stream ended without [DONE] — close any pending tool calls
+    for (_, (id, _)) in tool_calls.drain() {
+        let _ = on_event.send(StreamEvent::ToolCallEnd { id });
+    }
     let _ = on_event.send(StreamEvent::Done);
     Ok(())
 }
@@ -277,6 +281,7 @@ async fn stream_anthropic_sse(
     let mut buffer = String::new();
     // block_index -> id
     let mut tool_block_ids: HashMap<u64, String> = HashMap::new();
+    let mut thinking_block_indices: HashSet<u64> = HashSet::new();
 
     while let Some(result) = stream.next().await {
         let chunk = result.map_err(|e| AppError::Other(e.to_string()))?;
@@ -295,12 +300,22 @@ async fn stream_anthropic_sse(
                 match parsed["type"].as_str() {
                     Some("content_block_start") => {
                         let block = &parsed["content_block"];
-                        if block["type"].as_str() == Some("tool_use") {
-                            let id = block["id"].as_str().unwrap_or("").to_owned();
-                            let name = block["name"].as_str().unwrap_or("").to_owned();
-                            let index = parsed["index"].as_u64().unwrap_or(0);
-                            tool_block_ids.insert(index, id.clone());
-                            let _ = on_event.send(StreamEvent::ToolCallStart { id, name });
+                        match block["type"].as_str() {
+                            Some("tool_use") => {
+                                let id = block["id"].as_str().unwrap_or("").to_owned();
+                                let name = block["name"].as_str().unwrap_or("").to_owned();
+                                let index = parsed["index"].as_u64().unwrap_or(0);
+                                tool_block_ids.insert(index, id.clone());
+                                let _ = on_event.send(StreamEvent::ToolCallStart { id, name });
+                            }
+                            Some("thinking") => {
+                                let index = parsed["index"].as_u64().unwrap_or(0);
+                                thinking_block_indices.insert(index);
+                                let _ = on_event.send(StreamEvent::Chunk {
+                                    delta: "<think>".to_owned(),
+                                });
+                            }
+                            _ => {}
                         }
                     }
                     Some("content_block_delta") => {
@@ -308,6 +323,15 @@ async fn stream_anthropic_sse(
                         match block_delta["type"].as_str() {
                             Some("text_delta") => {
                                 if let Some(text) = block_delta["text"].as_str() {
+                                    if !text.is_empty() {
+                                        let _ = on_event.send(StreamEvent::Chunk {
+                                            delta: text.to_owned(),
+                                        });
+                                    }
+                                }
+                            }
+                            Some("thinking_delta") => {
+                                if let Some(text) = block_delta["thinking"].as_str() {
                                     if !text.is_empty() {
                                         let _ = on_event.send(StreamEvent::Chunk {
                                             delta: text.to_owned(),
@@ -336,12 +360,22 @@ async fn stream_anthropic_sse(
                     }
                     Some("content_block_stop") => {
                         let index = parsed["index"].as_u64().unwrap_or(0);
-                        if let Some(id) = tool_block_ids.get(&index) {
+                        if let Some(id) = tool_block_ids.remove(&index) {
                             let _ = on_event
-                                .send(StreamEvent::ToolCallEnd { id: id.clone() });
+                                .send(StreamEvent::ToolCallEnd { id });
+                        }
+                        if thinking_block_indices.remove(&index) {
+                            let _ = on_event.send(StreamEvent::Chunk {
+                                delta: "</think>".to_owned(),
+                            });
                         }
                     }
                     Some("message_stop") => {
+                        // Close any pending tool blocks before signalling done
+                        for (_, id) in tool_block_ids.drain() {
+                            let _ = on_event
+                                .send(StreamEvent::ToolCallEnd { id });
+                        }
                         let _ = on_event.send(StreamEvent::Done);
                         return Ok(());
                     }
@@ -351,6 +385,10 @@ async fn stream_anthropic_sse(
         }
     }
 
+    // Stream ended without message_stop — close pending tool blocks
+    for (_, id) in tool_block_ids.drain() {
+        let _ = on_event.send(StreamEvent::ToolCallEnd { id });
+    }
     let _ = on_event.send(StreamEvent::Done);
     Ok(())
 }

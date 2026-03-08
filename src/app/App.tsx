@@ -1,17 +1,20 @@
-import { useEffect, useState, useCallback } from "react"
-import { Settings, Files, GitBranch, Bot } from "lucide-react"
+import { useEffect, useState, useCallback, useRef } from "react"
+import { Settings, Files, GitBranch, Bot, Sun, Moon } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useProviderStore } from "@/stores/provider"
 import { useSkillsStore } from "@/stores/skills"
 import { useMajordomoStore, initMajordomoResultListener } from "@/stores/majordomo"
+import { useLayoutStore } from "@/stores/layout"
+import { useColumnResize } from "@/hooks/useColumnResize"
 import { initAppDirs } from "@/services/providers/storage"
 import { listWorkspaces, createWorkspace, newWorkspace } from "@/services/workspace"
 import { listProviders } from "@/services/providers/storage"
 import { listSkills } from "@/services/skills"
 import { registerBuiltins } from "@/services/tools/builtins"
 import { loadMajordomoMessages } from "@/services/conversation"
+import { agentPool } from "@/services/agent-pool"
 import { MajordomoPanel } from "@/components/majordomo/MajordomoPanel"
 import { ChatPanel } from "@/components/chat/ChatPanel"
 import { PreviewPanel } from "@/components/preview/PreviewPanel"
@@ -20,6 +23,7 @@ import { FlexibleWorkspace, type Pane } from "@/components/workspace/FlexibleWor
 import { AgentsPanel } from "@/components/agents/AgentsPanel"
 import { ProviderSettings } from "@/components/provider/ProviderSettings"
 import { CommandPalette } from "@/components/majordomo/CommandPalette"
+import { LayoutToggle } from "@/components/ui/LayoutToggle"
 import type { RenderableContent } from "@/types"
 
 export default function App() {
@@ -34,6 +38,34 @@ export default function App() {
   const { setProviders } = useProviderStore()
   const { setSkills } = useSkillsStore()
   const { setMessages: setMajordomoMessages } = useMajordomoStore()
+  const {
+    majordomoWidth,
+    rightPanelWidth,
+    showLeft,
+    showCenter,
+    showRight,
+    setMajordomoWidth,
+    setRightPanelWidth,
+  } = useLayoutStore()
+
+  // Panel DOM refs for direct width mutation during drag
+  const mjPanelRef = useRef<HTMLDivElement>(null)
+  const rightPanelRef = useRef<HTMLDivElement>(null)
+
+  // ── Panel resize logic ─────────────────────────────────────
+
+  const startMjResize = useColumnResize(mjPanelRef, majordomoWidth, {
+    min: 180,
+    max: 600,
+    onCommit: setMajordomoWidth,
+  })
+
+  const startRightResize = useColumnResize(rightPanelRef, rightPanelWidth, {
+    min: 180,
+    max: 500,
+    onCommit: setRightPanelWidth,
+    invertDelta: true,
+  })
 
   // Right panel tab state: "files" | "git"
   const [rightPanelTab, setRightPanelTab] = useState<"files" | "git">("files")
@@ -74,6 +106,10 @@ export default function App() {
         setSkills(skillsList)
         setMajordomoMessages(majordomoMsgs)
 
+        // Connect pool agents for all workspaces so dispatches work
+        // regardless of which workspace is currently visible in the UI
+        agentPool.initAll(wsList)
+
         if (wsList.length > 0) {
           setActiveWorkspace(wsList[0].id)
         } else {
@@ -94,6 +130,13 @@ export default function App() {
       unsubscribeResults()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep pool in sync when workspaces are added/removed
+  useEffect(() => {
+    if (workspaces.length > 0) {
+      agentPool.initAll(workspaces)
+    }
+  }, [workspaces])
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -135,7 +178,12 @@ export default function App() {
           }
           setPreviewMap((prev) => ({
             ...prev,
-            [pane.id]: { type: rendererType, content, language: ext },
+            [pane.id]: {
+              type: rendererType,
+              content,
+              language: ext,
+              filename: pane.title,
+            },
           }))
         } catch (err) {
           console.error("Failed to load file:", err)
@@ -154,26 +202,31 @@ export default function App() {
 
   // Render content for a pane based on its type
   const renderPaneContent = useCallback(
-    (pane: Pane): React.ReactNode => {
-      if (!activeWorkspace) return null
-
+    (pane: Pane, onClose: () => void): React.ReactNode => {
       if (pane.type === "agent") {
+        // Use the workspace from the pane, or fall back to activeWorkspace
+        const workspace = pane.workspaceId
+          ? workspaces.find((ws) => ws.id === pane.workspaceId)
+          : activeWorkspace
+        if (!workspace) return null
         return (
           <ChatPanel
-            workspace={activeWorkspace}
+            workspace={workspace}
+            onClose={onClose}
             onPreview={(content) => handlePreview(pane.id, content)}
           />
         )
       }
 
       if (pane.type === "file") {
+        if (!activeWorkspace) return null
         const content = previewMap[pane.id]
-        return content ? <PreviewPanel content={content} /> : null
+        return content ? <PreviewPanel content={content} onClose={onClose} /> : null
       }
 
       return null
     },
-    [activeWorkspace, previewMap]
+    [activeWorkspace, workspaces, previewMap]
   )
 
   return (
@@ -204,8 +257,9 @@ export default function App() {
             <kbd>⌘K</kbd>
             <span>Search</span>
           </button>
-          <button className="theme-btn" onClick={toggleTheme} title="Toggle theme">
-            {theme === "dark" ? "☀️" : "🌙"}
+          <LayoutToggle />
+          <button className="icon-btn" onClick={toggleTheme} title="Toggle theme">
+            {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
           </button>
           <button className="icon-btn" onClick={openSettings} title="Settings (⌘,)">
             <Settings size={14} />
@@ -215,64 +269,82 @@ export default function App() {
 
       {/* ── MAIN BODY: 3-column layout ── */}
       <div className="body">
-        {/* Column 1: Majordomo (permanent) */}
-        <MajordomoPanel />
+        {/* Column 1: Majordomo — removed from DOM when hidden */}
+        {showLeft && <MajordomoPanel panelRef={mjPanelRef} />}
 
-        {/* Column 2: Flexible Workspace (middle) */}
-        {activeWorkspace ? (
-          <FlexibleWorkspace
-            initialPanes={workspacePanes}
-            onPanesChange={handlePanesChange}
-            renderContent={renderPaneContent}
-          />
-        ) : (
-          <div className="workspace-empty">
-            <p>Create a workspace to get started.</p>
-          </div>
+        {/* Resize handle between Majordomo and workspace */}
+        {showLeft && showCenter && (
+          <div className="panel-resize-handle" onPointerDown={startMjResize} />
         )}
 
-        {/* Column 3: Right Panel (Files/Git tabs + Agents) */}
-        {activeWorkspace && (
-          <div className="right-panel">
-            {/* Top: File tabs (Files, Git, etc.) - 70% */}
-            <div className="right-panel-top">
-              <div className="right-panel-tabs">
-                <button
-                  className={`right-panel-tab ${rightPanelTab === "files" ? "on" : ""}`}
-                  onClick={() => setRightPanelTab("files")}
-                >
-                  <Files size={12} />
-                  <span>Files</span>
-                </button>
-                <button
-                  className={`right-panel-tab ${rightPanelTab === "git" ? "on" : ""}`}
-                  onClick={() => setRightPanelTab("git")}
-                >
-                  <GitBranch size={12} />
-                  <span>Git</span>
-                </button>
-              </div>
-              <div className="right-panel-content">
-                {rightPanelTab === "files" && (
-                  <WorkspacePanel workspace={activeWorkspace} />
-                )}
-                {rightPanelTab === "git" && (
-                  <div className="right-panel-placeholder">
-                    Git integration coming soon
-                  </div>
-                )}
-              </div>
+        {/* Column 2: Flexible Workspace (middle) */}
+        {showCenter &&
+          (activeWorkspace ? (
+            <FlexibleWorkspace
+              workspaceId={activeWorkspace.id}
+              initialPanes={workspacePanes}
+              onPanesChange={handlePanesChange}
+              renderContent={renderPaneContent}
+            />
+          ) : (
+            <div className="workspace-empty">
+              <p>Create a workspace to get started.</p>
             </div>
+          ))}
 
-            {/* Bottom: Agents panel - 30% */}
-            <div className="right-panel-bottom">
-              <div className="right-panel-bottom-header">
-                <Bot size={12} />
-                <span>Agents</span>
+        {/* Column 3: Right Panel (Files/Git tabs + Agents) — removed from DOM when hidden */}
+        {showRight && activeWorkspace && (
+          <>
+            {/* Resize handle between workspace and right panel */}
+            {showCenter && (
+              <div className="panel-resize-handle" onPointerDown={startRightResize} />
+            )}
+
+            <div
+              ref={rightPanelRef}
+              className="right-panel"
+              style={{ width: rightPanelWidth }}
+            >
+              {/* Top: File tabs (Files, Git, etc.) - 70% */}
+              <div className="right-panel-top">
+                <div className="right-panel-tabs">
+                  <button
+                    className={`right-panel-tab ${rightPanelTab === "files" ? "on" : ""}`}
+                    onClick={() => setRightPanelTab("files")}
+                  >
+                    <Files size={12} />
+                    <span>Files</span>
+                  </button>
+                  <button
+                    className={`right-panel-tab ${rightPanelTab === "git" ? "on" : ""}`}
+                    onClick={() => setRightPanelTab("git")}
+                  >
+                    <GitBranch size={12} />
+                    <span>Git</span>
+                  </button>
+                </div>
+                <div className="right-panel-content">
+                  {rightPanelTab === "files" && (
+                    <WorkspacePanel workspace={activeWorkspace} />
+                  )}
+                  {rightPanelTab === "git" && (
+                    <div className="right-panel-placeholder">
+                      Git integration coming soon
+                    </div>
+                  )}
+                </div>
               </div>
-              <AgentsPanel />
+
+              {/* Bottom: Agents panel - 30% */}
+              <div className="right-panel-bottom">
+                <div className="right-panel-bottom-header">
+                  <Bot size={12} />
+                  <span>Agents</span>
+                </div>
+                <AgentsPanel />
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
 

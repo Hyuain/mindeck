@@ -1,30 +1,36 @@
-import { useState } from "react"
-import { FileText } from "lucide-react"
-import type { RenderableContent, RendererType } from "@/types"
+import { FileCode, FileText, File, X } from "lucide-react"
+import type { RenderableContent } from "@/types"
 import { detectRenderer } from "./RendererRegistry"
 
 interface PreviewPanelProps {
   content: RenderableContent | null
+  onClose?: () => void
 }
 
-const RENDERER_TABS: { id: RendererType; label: string }[] = [
-  { id: "markdown", label: "md" },
-  { id: "code", label: "code" },
-  { id: "image", label: "image" },
-  { id: "raw", label: "raw" },
-]
+function FileIcon({ type }: { type: RenderableContent["type"] }) {
+  if (type === "code")
+    return <FileCode size={12} style={{ opacity: 0.45, flexShrink: 0 }} />
+  if (type === "markdown")
+    return <FileText size={12} style={{ opacity: 0.45, flexShrink: 0 }} />
+  return <File size={12} style={{ opacity: 0.45, flexShrink: 0 }} />
+}
 
-export function PreviewPanel({ content }: PreviewPanelProps) {
-  const [overrideType, setOverrideType] = useState<RendererType | null>(null)
-
+export function PreviewPanel({ content, onClose }: PreviewPanelProps) {
   if (!content) {
     return (
       <div className="preview-panel">
         <div className="preview-head">
-          <FileText size={13} style={{ opacity: 0.4 }} />
+          <File size={12} style={{ opacity: 0.35, flexShrink: 0 }} />
           <span className="preview-name" style={{ color: "var(--color-t2)" }}>
             No preview
           </span>
+          {onClose && (
+            <div className="preview-head-actions">
+              <button className="pane-close-btn" onClick={onClose} title="Close pane">
+                <X size={12} />
+              </button>
+            </div>
+          )}
         </div>
         <div className="preview-body preview-empty">
           <p>Preview will appear here when the agent generates output.</p>
@@ -33,37 +39,28 @@ export function PreviewPanel({ content }: PreviewPanelProps) {
     )
   }
 
-  const activeContent: RenderableContent = overrideType
-    ? { ...content, type: overrideType }
-    : content
-  const renderer = detectRenderer(activeContent)
+  const renderer = detectRenderer(content)
   const { Component } = renderer
 
-  const filename = content.filename ?? "output"
-  const activeType = overrideType ?? content.type
+  const filename = content.filename ?? content.type
 
   return (
     <div className="preview-panel">
       <div className="preview-head">
-        <span className="preview-icon">
-          {content.type === "image" ? "🖼" : content.type === "code" ? "📝" : "📄"}
-        </span>
+        <FileIcon type={content.type} />
         <span className="preview-name">{filename}</span>
-        <span className="preview-tag">{activeType}</span>
-        <div className="r-tabs">
-          {RENDERER_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              className={`r-tab${activeType === tab.id ? " on" : ""}`}
-              onClick={() => setOverrideType(tab.id === content.type ? null : tab.id)}
-            >
-              {tab.label}
+        <div className="preview-head-actions">
+          {onClose && (
+            <button className="pane-close-btn" onClick={onClose} title="Close pane">
+              <X size={12} />
             </button>
-          ))}
+          )}
         </div>
       </div>
-      <div className="preview-body">
-        <Component content={activeContent} />
+      <div
+        className={`preview-body${content.type === "code" ? " preview-body--code" : ""}`}
+      >
+        <Component content={content} />
       </div>
     </div>
   )

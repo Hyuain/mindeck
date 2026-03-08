@@ -1,10 +1,14 @@
-import { useEffect, useRef, useCallback, useState } from "react"
-import { Eraser } from "lucide-react"
+import { useEffect, useCallback, useState } from "react"
+import { Eraser, X } from "lucide-react"
 import { useChatStore } from "@/stores/chat"
 import { useProviderStore } from "@/stores/provider"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { loadMessages, clearMessages } from "@/services/conversation"
-import { WorkspaceAgent } from "@/services/workspace-agent"
+import {
+  agentPool,
+  registerChatCallbacks,
+  clearChatCallbacks,
+} from "@/services/agent-pool"
 import { ModelSelector } from "@/components/provider/ModelSelector"
 import { MessageList } from "./MessageList"
 import { ChatInput } from "./ChatInput"
@@ -14,9 +18,10 @@ import type { ToolActivity, Workspace } from "@/types"
 interface ChatPanelProps {
   workspace: Workspace
   onPreview?: (content: string) => void
+  onClose?: () => void
 }
 
-export function ChatPanel({ workspace, onPreview }: ChatPanelProps) {
+export function ChatPanel({ workspace, onPreview, onClose }: ChatPanelProps) {
   const {
     messages,
     streaming,
@@ -30,19 +35,14 @@ export function ChatPanel({ workspace, onPreview }: ChatPanelProps) {
   const [pendingDispatch, setPendingDispatch] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
 
-  const agentRef = useRef<WorkspaceAgent | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
-
   const msgs = messages[workspace.id] ?? []
   const isStreaming = streaming[workspace.id] ?? false
 
   // Load persisted messages on workspace open
   useEffect(() => {
-    if (messages[workspace.id] !== undefined) return // already loaded
+    if (messages[workspace.id] !== undefined) return
     loadMessages(workspace.id)
       .then((loaded) => {
-        // Guard against race: if messages were added during loading (e.g., from a
-        // Majordomo dispatch), don't overwrite them — those are more current.
         if (useChatStore.getState().messages[workspace.id] === undefined) {
           setMessages(workspace.id, loaded)
         }
@@ -52,20 +52,13 @@ export function ChatPanel({ workspace, onPreview }: ChatPanelProps) {
       )
   }, [workspace.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Create / reconnect the workspace agent whenever workspace changes
+  // Register UI callbacks with the pool agent on mount; clear on unmount
   useEffect(() => {
-    abortRef.current?.abort()
-    abortRef.current = new AbortController()
-
     const { setStreaming } = useChatStore.getState()
 
-    const agent = new WorkspaceAgent({
-      workspace,
-      signal: abortRef.current.signal,
-      onChunk: (delta) => {
-        if (onPreview && delta.length > 0) {
-          // Accumulate for preview (handled via full content in process())
-        }
+    registerChatCallbacks(workspace.id, {
+      onChunk: (_delta) => {
+        // message content already updated by agent via Zustand — no extra work needed
       },
       onToolStart: (activity) => {
         setToolActivities((prev) => {
@@ -91,7 +84,6 @@ export function ChatPanel({ workspace, onPreview }: ChatPanelProps) {
           if (lastMsg?.role === "assistant" && lastMsg.content.length > 50 && onPreview) {
             onPreview(lastMsg.content)
           }
-          // Clear tool activities after a short delay
           setTimeout(() => setToolActivities([]), 3000)
         }
       },
@@ -100,25 +92,25 @@ export function ChatPanel({ workspace, onPreview }: ChatPanelProps) {
       },
     })
 
-    agent.connect()
-    agentRef.current = agent
-
     return () => {
-      agent.disconnect()
-      abortRef.current?.abort()
+      clearChatCallbacks(workspace.id)
     }
   }, [workspace.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keep agent config in sync with workspace changes (model changes, etc.)
+  // Keep pool agent config in sync with workspace changes (model changes, etc.)
   useEffect(() => {
-    agentRef.current?.updateConfig(workspace)
+    agentPool.update(workspace)
   }, [workspace])
 
-  const handleSend = useCallback((content: string) => {
-    agentRef.current?.send(content)
-  }, [])
+  const handleSend = useCallback(
+    (content: string) => {
+      agentPool.get(workspace.id)?.send(content)
+    },
+    [workspace.id]
+  )
 
   const handleClearContext = useCallback(() => {
+    setConfirmClear(false)
     clearChatMessages(workspace.id)
     clearMessages(workspace.id).catch(console.warn)
   }, [workspace.id, clearChatMessages])
@@ -143,14 +135,21 @@ export function ChatPanel({ workspace, onPreview }: ChatPanelProps) {
             selectedModelId={workspace.agentConfig.modelId}
             onChange={handleModelChange}
           />
-          <button
-            className="chat-clear-btn"
-            onClick={() => setConfirmClear(true)}
-            title="Clear conversation history"
-            disabled={isStreaming || msgs.length === 0}
-          >
-            <Eraser size={11} />
-          </button>
+          <div className="chat-head-actions">
+            <button
+              className="chat-clear-btn"
+              onClick={() => setConfirmClear(true)}
+              title="Clear conversation history"
+              disabled={isStreaming || msgs.length === 0}
+            >
+              <Eraser size={11} />
+            </button>
+            {onClose && (
+              <button className="pane-close-btn" onClick={onClose} title="Close pane">
+                <X size={12} />
+              </button>
+            )}
+          </div>
         </div>
         <MessageList messages={msgs} isStreaming={isStreaming} />
         {pendingDispatch && (

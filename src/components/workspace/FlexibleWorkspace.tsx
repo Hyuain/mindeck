@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, type ReactNode } from "react"
-import { X } from "lucide-react"
 import { useDragState, type DropPosition } from "@/services/dragState"
+import { useLayoutStore, type SerializedPane } from "@/stores/layout"
 
 export type PaneType = "agent" | "file"
 
@@ -35,12 +35,14 @@ interface DropTarget {
 }
 
 interface FlexibleWorkspaceProps {
+  /** Workspace ID used for layout persistence */
+  workspaceId?: string
   /** Initial panes to display */
   initialPanes?: Pane[]
   /** Callback when panes change */
   onPanesChange?: (panes: Pane[]) => void
-  /** Render function for pane content */
-  renderContent?: (pane: Pane) => ReactNode
+  /** Render function for pane content — receives the pane and a close handler */
+  renderContent?: (pane: Pane, onClose: () => void) => ReactNode
 }
 
 // ─── Module-level pure helpers ─────────────────────────────
@@ -70,7 +72,8 @@ function splitPaneInLayout(
 ): PaneNode {
   if (layout.type === "pane") {
     if (layout.paneId !== targetPaneId) return layout
-    const direction = position === "left" || position === "right" ? "horizontal" : "vertical"
+    const direction =
+      position === "left" || position === "right" ? "horizontal" : "vertical"
     const putNewFirst = position === "left" || position === "top"
     const newNode: PaneNode = { type: "pane", paneId: newPaneId }
     return {
@@ -93,14 +96,27 @@ function splitPaneInLayout(
 // ─── Main component ────────────────────────────────────────
 
 export function FlexibleWorkspace({
+  workspaceId,
   initialPanes = [],
   onPanesChange,
   renderContent,
 }: FlexibleWorkspaceProps) {
-  // Flat pane list
-  const [panes, setPanes] = useState<Pane[]>(initialPanes)
-  // Tree-based layout structure
-  const [layout, setLayout] = useState<PaneNode | null>(null)
+  // Flat pane list — initialize from saved layout if available, else from initialPanes
+  const [panes, setPanes] = useState<Pane[]>(() => {
+    if (workspaceId) {
+      const saved = useLayoutStore.getState().workspaceLayouts[workspaceId]
+      if (saved?.panes.length) return saved.panes as Pane[]
+    }
+    return initialPanes
+  })
+  // Tree-based layout structure — initialize from saved layout if available
+  const [layout, setLayout] = useState<PaneNode | null>(() => {
+    if (workspaceId) {
+      const saved = useLayoutStore.getState().workspaceLayouts[workspaceId]
+      return saved?.layout ?? null
+    }
+    return null
+  })
   // Drag state
   const [dragPreview, setDragPreview] = useState<{
     type: PaneType
@@ -113,17 +129,43 @@ export function FlexibleWorkspace({
 
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Stable refs to current state (declared early so mount effect below can use them)
+  const panesRef = useRef(panes)
+  const layoutRef = useRef(layout)
+  const isDraggingRef = useRef(false)
+  const onPanesChangeRef = useRef(onPanesChange)
+
+  // Notify parent of restored panes on mount (so file content gets loaded)
+  useEffect(() => {
+    if (panesRef.current.length > 0) {
+      onPanesChangeRef.current?.(panesRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // run once on mount only
+
+  // Debounced save of layout to persistent store
+  useEffect(() => {
+    if (!workspaceId) return
+    const t = setTimeout(() => {
+      useLayoutStore.getState().setWorkspaceLayout(workspaceId, {
+        panes: [...panes].map(({ id, type, title, workspaceId: wsId, filePath }) => ({
+          id,
+          type,
+          title,
+          workspaceId: wsId,
+          filePath,
+        })) as SerializedPane[],
+        layout,
+      })
+    }, 500)
+    return () => clearTimeout(t)
+  }, [layout, panes, workspaceId])
+
   // Refs — avoid setState on every pointermove
   const cursorPosRef = useRef<{ x: number; y: number } | null>(null)
   const dropPositionRef = useRef<DropPosition>(null)
   const dropTargetRef = useRef<DropTarget | null>(null)
   const rafRef = useRef<number | null>(null)
-
-  // Stable refs to current state
-  const panesRef = useRef(panes)
-  const layoutRef = useRef(layout)
-  const isDraggingRef = useRef(false)
-  const onPanesChangeRef = useRef(onPanesChange)
 
   panesRef.current = panes
   layoutRef.current = layout
@@ -237,6 +279,7 @@ export function FlexibleWorkspace({
   )
 
   const handlePointerLeave = useCallback(() => {
+    isDraggingRef.current = false
     setDragPreview(null)
     setDropPositionLocal(null)
     setDropTarget(null)
@@ -253,7 +296,10 @@ export function FlexibleWorkspace({
       if (rafRef.current !== null) return // RAF already scheduled
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null
-        const pos = calculateDropPosition(cursorPosRef.current!.x, cursorPosRef.current!.y)
+        const pos = calculateDropPosition(
+          cursorPosRef.current!.x,
+          cursorPosRef.current!.y
+        )
         if (pos !== dropPositionRef.current) {
           dropPositionRef.current = pos
           setDropPositionLocal(pos)
@@ -298,7 +344,9 @@ export function FlexibleWorkspace({
       }
 
       const direction: "horizontal" | "vertical" =
-        effectiveDropPos === "left" || effectiveDropPos === "right" ? "horizontal" : "vertical"
+        effectiveDropPos === "left" || effectiveDropPos === "right"
+          ? "horizontal"
+          : "vertical"
       const putNewPaneFirst = effectiveDropPos === "left" || effectiveDropPos === "top"
 
       return {
@@ -332,20 +380,25 @@ export function FlexibleWorkspace({
   )
 
   // Commit new split sizes after resize drag
-  const updateSplitSizes = useCallback((targetKey: string, newSizes: [number, number]) => {
-    setLayout((prev) => {
-      if (!prev) return prev
-      return updateSizesInTree(prev, "root", targetKey, newSizes)
-    })
-  }, [])
+  const updateSplitSizes = useCallback(
+    (targetKey: string, newSizes: [number, number]) => {
+      setLayout((prev) => {
+        if (!prev) return prev
+        return updateSizesInTree(prev, "root", targetKey, newSizes)
+      })
+    },
+    []
+  )
 
   // ── Split handle resize ────────────────────────────────────
   const handleSplitResize = useCallback(
     (e: React.PointerEvent<HTMLDivElement>, nodeKey: string, isHorizontal: boolean) => {
+      e.preventDefault() // prevent text selection while resizing
       e.stopPropagation()
       const handle = e.currentTarget // capture before event handler returns
       handle.setPointerCapture(e.pointerId)
       handle.classList.add("resizing")
+      document.body.style.userSelect = "none"
 
       const container = handle.parentElement!
       const c0 = container.querySelector<HTMLElement>(
@@ -378,6 +431,7 @@ export function FlexibleWorkspace({
           : (c0.offsetHeight / totalSize) * 100
         const finalPct0 = Math.max(10, Math.min(90, isNaN(finalRaw) ? 50 : finalRaw))
         handle.classList.remove("resizing")
+        document.body.style.userSelect = ""
         handle.removeEventListener("pointermove", onMove)
         handle.removeEventListener("pointerup", onUp)
         updateSplitSizes(nodeKey, [finalPct0, 100 - finalPct0])
@@ -424,7 +478,10 @@ export function FlexibleWorkspace({
             // Workspace-level wrap (or empty state)
             const dropPos =
               dragState.dropPosition ||
-              calculateDropPosition(cursorPosRef.current?.x || 0, cursorPosRef.current?.y || 0)
+              calculateDropPosition(
+                cursorPosRef.current?.x || 0,
+                cursorPosRef.current?.y || 0
+              )
 
             console.log(
               "[FlexibleWorkspace] Drop:",
@@ -519,9 +576,9 @@ export function FlexibleWorkspace({
   )
 
   const getPaneContent = useCallback(
-    (pane: Pane): ReactNode => {
+    (pane: Pane, onClose: () => void): ReactNode => {
       if (pane.content) return pane.content
-      if (renderContent) return renderContent(pane)
+      if (renderContent) return renderContent(pane, onClose)
       return null
     },
     [renderContent]
@@ -537,9 +594,17 @@ export function FlexibleWorkspace({
 
       return (
         <div key={node.paneId} className="ws-pane" style={{ flex: 1 }}>
-          <PaneHeader title={pane.title} onClose={() => removePane(pane.id)} />
-          <div style={{ flex: 1, overflow: "auto", minHeight: 0, minWidth: 0 }}>
-            {getPaneContent(pane)}
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              minHeight: 0,
+              minWidth: 0,
+            }}
+          >
+            {getPaneContent(pane, () => removePane(pane.id))}
           </div>
           {dragPreview && (
             <PaneDragOverlay
@@ -646,22 +711,6 @@ export function FlexibleWorkspace({
 }
 
 // ─── Sub-components ────────────────────────────────────────
-
-interface PaneHeaderProps {
-  title: string
-  onClose: () => void
-}
-
-function PaneHeader({ title, onClose }: PaneHeaderProps) {
-  return (
-    <div className="ws-pane-header">
-      <span className="ws-pane-title">{title}</span>
-      <button className="ws-pane-close" onClick={onClose} title="Close pane">
-        <X size={12} />
-      </button>
-    </div>
-  )
-}
 
 // ── Per-pane drag drop overlay ─────────────────────────────
 

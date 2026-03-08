@@ -1,7 +1,16 @@
 import { create } from "zustand"
-import type { Message, WorkspaceSummary, ToolActivity, TaskResultEvent } from "@/types"
+import type {
+  Message,
+  WorkspaceSummary,
+  ToolActivity,
+  TaskResultEvent,
+  PermissionRequest,
+} from "@/types"
 import { appendMajordomoMessage } from "@/services/conversation"
 import { eventBus } from "@/services/event-bus"
+import { createLogger } from "@/services/logger"
+
+const log = createLogger("Majordomo")
 
 interface MajordomoState {
   messages: Message[]
@@ -10,6 +19,7 @@ interface MajordomoState {
   selectedProviderId: string
   selectedModelId: string
   activeToolActivities: ToolActivity[]
+  pendingPermissions: PermissionRequest[]
   // actions
   setMessages: (messages: Message[]) => void
   appendMessage: (message: Message) => void
@@ -25,6 +35,8 @@ interface MajordomoState {
   setModel: (providerId: string, modelId: string) => void
   setToolActivity: (activity: ToolActivity) => void
   clearToolActivities: () => void
+  addPermissionRequest: (req: PermissionRequest) => void
+  removePermissionRequest: (id: string) => void
 }
 
 export const useMajordomoStore = create<MajordomoState>((set) => ({
@@ -34,6 +46,7 @@ export const useMajordomoStore = create<MajordomoState>((set) => ({
   selectedProviderId: "",
   selectedModelId: "",
   activeToolActivities: [],
+  pendingPermissions: [],
 
   setMessages: (messages) => set({ messages }),
 
@@ -41,7 +54,7 @@ export const useMajordomoStore = create<MajordomoState>((set) => ({
     set((state) => ({ messages: [...state.messages, message] }))
     // Persist to disk asynchronously
     appendMajordomoMessage(message).catch((err: unknown) =>
-      console.warn("[Majordomo] Failed to persist message:", err)
+      log.warn("Failed to persist message", err)
     )
   },
 
@@ -102,6 +115,14 @@ export const useMajordomoStore = create<MajordomoState>((set) => ({
     }),
 
   clearToolActivities: () => set({ activeToolActivities: [] }),
+
+  addPermissionRequest: (req) =>
+    set((state) => ({ pendingPermissions: [...state.pendingPermissions, req] })),
+
+  removePermissionRequest: (id) =>
+    set((state) => ({
+      pendingPermissions: state.pendingPermissions.filter((r) => r.id !== id),
+    })),
 }))
 
 /**
