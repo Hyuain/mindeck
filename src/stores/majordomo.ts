@@ -1,19 +1,19 @@
 import { create } from "zustand"
 import type {
-  Message,
   WorkspaceSummary,
   ToolActivity,
   TaskResultEvent,
   PermissionRequest,
+  Message,
 } from "@/types"
-import { appendMajordomoMessage } from "@/services/conversation"
+import { appendMajordomoMessage, MAJORDOMO_WS_ID } from "@/services/conversation"
 import { eventBus } from "@/services/event-bus"
+import { useChatStore } from "@/stores/chat"
 import { createLogger } from "@/services/logger"
 
 const log = createLogger("Majordomo")
 
 interface MajordomoState {
-  messages: Message[]
   workspaceSummaries: WorkspaceSummary[]
   isStreaming: boolean
   selectedProviderId: string
@@ -21,14 +21,6 @@ interface MajordomoState {
   activeToolActivities: ToolActivity[]
   pendingPermissions: PermissionRequest[]
   // actions
-  setMessages: (messages: Message[]) => void
-  appendMessage: (message: Message) => void
-  /** Add a message to state only — no persistence (use for streaming placeholders) */
-  pushMessageDraft: (message: Message) => void
-  updateLastMessage: (patch: Partial<Message>) => void
-  /** Remove the last message if it's an empty assistant draft (cleanup after silent turns) */
-  removeDraftIfEmpty: () => void
-  clearMessages: () => void
   setStreaming: (streaming: boolean) => void
   updateSummary: (summary: WorkspaceSummary) => void
   setSummaries: (summaries: WorkspaceSummary[]) => void
@@ -40,48 +32,12 @@ interface MajordomoState {
 }
 
 export const useMajordomoStore = create<MajordomoState>((set) => ({
-  messages: [],
   workspaceSummaries: [],
   isStreaming: false,
   selectedProviderId: "",
   selectedModelId: "",
   activeToolActivities: [],
   pendingPermissions: [],
-
-  setMessages: (messages) => set({ messages }),
-
-  appendMessage: (message) => {
-    set((state) => ({ messages: [...state.messages, message] }))
-    // Persist to disk asynchronously
-    appendMajordomoMessage(message).catch((err: unknown) =>
-      log.warn("Failed to persist message", err)
-    )
-  },
-
-  pushMessageDraft: (message) =>
-    set((state) => ({ messages: [...state.messages, message] })),
-
-  updateLastMessage: (patch) =>
-    set((state) => {
-      const msgs = state.messages
-      if (msgs.length === 0) return state
-      return {
-        messages: msgs.map((m, i) => (i === msgs.length - 1 ? { ...m, ...patch } : m)),
-      }
-    }),
-
-  removeDraftIfEmpty: () =>
-    set((state) => {
-      const msgs = state.messages
-      if (msgs.length === 0) return state
-      const last = msgs[msgs.length - 1]
-      if (last.role === "assistant" && !last.content.trim()) {
-        return { messages: msgs.slice(0, -1) }
-      }
-      return state
-    }),
-
-  clearMessages: () => set({ messages: [] }),
 
   setStreaming: (isStreaming) => set({ isStreaming }),
 
@@ -131,7 +87,6 @@ export const useMajordomoStore = create<MajordomoState>((set) => ({
  */
 export function initMajordomoResultListener(): () => void {
   return eventBus.on("task:result", (event: TaskResultEvent) => {
-    const { appendMessage: append } = useMajordomoStore.getState()
     const notif: Message = {
       id: crypto.randomUUID(),
       role: "system",
@@ -145,6 +100,11 @@ export function initMajordomoResultListener(): () => void {
         fullResult: event.result,
       },
     }
-    append(notif)
+    // Persist to disk
+    appendMajordomoMessage(notif).catch((err: unknown) =>
+      log.warn("Failed to persist result card", err)
+    )
+    // Add to chat store under the majordomo workspace key
+    useChatStore.getState().appendMessage(MAJORDOMO_WS_ID, notif)
   })
 }

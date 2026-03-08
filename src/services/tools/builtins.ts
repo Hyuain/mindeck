@@ -216,7 +216,7 @@ export function registerBuiltins(): void {
     definition: {
       name: "report_to_majordomo",
       description:
-        "Send a status update or result back to Majordomo. Use this to proactively report progress or ask for guidance.",
+        "Send a status update or result back to Majordomo. Use this to proactively report progress or findings.",
       parameters: {
         type: "object",
         properties: {
@@ -233,11 +233,20 @@ export function registerBuiltins(): void {
         required: ["workspaceId", "summary", "details"],
       },
     },
-    async execute(_args) {
-      // Result reporting is handled by WorkspaceAgent after the loop completes.
-      // Returning the details here so the agent sees confirmation and can
-      // include them in its final response.
-      return "Report acknowledged. WorkspaceAgent will forward the result to Majordomo."
+    async execute(args) {
+      const { workspaceId, summary, details } = args as {
+        workspaceId: string
+        summary: string
+        details: string
+      }
+      eventBus.emit("task:result", {
+        dispatchId: crypto.randomUUID(),
+        workspaceId,
+        result: details,
+        summary: summary.slice(0, 200),
+      })
+      log.info("report_to_majordomo: emitted task:result", { workspaceId, summary })
+      return `Report sent to Majordomo: "${summary}"`
     },
   })
 }

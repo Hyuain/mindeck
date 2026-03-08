@@ -15,6 +15,12 @@ export interface AgentLoopResult {
   text: string
   /** Names of tools that were actually executed during the loop */
   toolsCalled: string[]
+  /**
+   * All assistant+tool turns added to history during the loop,
+   * EXCLUDING the final text-only assistant response.
+   * Used by callers to persist multi-turn tool history.
+   */
+  intermediateMessages: AgentMessage[]
 }
 
 export interface AgentLoopOptions {
@@ -70,6 +76,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   const tools = opts.tools ?? getToolDefinitions()
   let workingHistory: AgentMessage[] = [...opts.history]
   const allToolsCalled: string[] = []
+  const intermediateMessages: AgentMessage[] = []
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     let accumText = ""
@@ -84,7 +91,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       tools.length > 0 ? tools : undefined,
       signal
     )) {
-      if (signal?.aborted) return { text: accumText, toolsCalled: allToolsCalled }
+      if (signal?.aborted)
+        return { text: accumText, toolsCalled: allToolsCalled, intermediateMessages }
 
       if (chunk.delta) {
         accumText += chunk.delta
@@ -155,10 +163,13 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     }
     workingHistory = [...workingHistory, assistantTurn]
 
-    // No tool calls — model is done
+    // No tool calls — model is done (this is the final response, not intermediate)
     if (completedCalls.length === 0) {
-      return { text: accumText, toolsCalled: allToolsCalled }
+      return { text: accumText, toolsCalled: allToolsCalled, intermediateMessages }
     }
+
+    // This assistant turn had tool calls — track it as intermediate
+    intermediateMessages.push(assistantTurn)
 
     // Execute all tool calls (extraExecutors take priority over global registry)
     const results = await Promise.allSettled(
@@ -192,6 +203,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           content: truncateToolResult(result),
         }
         workingHistory = [...workingHistory, toolTurn]
+        intermediateMessages.push(toolTurn)
       }
     }
   }
@@ -200,5 +212,6 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   return {
     text: `Reached maximum iterations (${maxIterations}). Last response may be incomplete.`,
     toolsCalled: allToolsCalled,
+    intermediateMessages,
   }
 }

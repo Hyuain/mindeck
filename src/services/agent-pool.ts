@@ -8,8 +8,21 @@
  * ChatPanel registers UI callbacks on mount and clears them on unmount.
  * Dispatch handling and task recovery happen independently of any UI.
  */
-import { WorkspaceAgent, type UICallbacks } from "./workspace-agent"
+import { WorkspaceAgent, type AgentDeps, type UICallbacks } from "./workspace-agent"
+import { useChatStore } from "@/stores/chat"
+import { useProviderStore } from "@/stores/provider"
 import type { Workspace } from "@/types"
+
+function makeRealDeps(): AgentDeps {
+  return {
+    getMessages: (id) => useChatStore.getState().messages[id] ?? [],
+    appendMessage: (id, msg) => useChatStore.getState().appendMessage(id, msg),
+    updateLastMessage: (id, patch) =>
+      useChatStore.getState().updateLastMessage(id, patch),
+    getProvider: (id) => useProviderStore.getState().providers.find((p) => p.id === id),
+    setStreaming: (id, s) => useChatStore.getState().setStreaming(id, s),
+  }
+}
 
 class AgentPool {
   private agents = new Map<string, WorkspaceAgent>()
@@ -21,7 +34,7 @@ class AgentPool {
       existing.updateConfig(workspace)
       return existing
     }
-    const agent = new WorkspaceAgent(workspace)
+    const agent = new WorkspaceAgent(workspace, makeRealDeps())
     agent.connect()
     this.agents.set(workspace.id, agent)
     return agent
@@ -60,10 +73,7 @@ class AgentPool {
 export const agentPool = new AgentPool()
 
 /** Convenience: register UI callbacks from ChatPanel on mount. */
-export function registerChatCallbacks(
-  workspaceId: string,
-  callbacks: UICallbacks
-): void {
+export function registerChatCallbacks(workspaceId: string, callbacks: UICallbacks): void {
   agentPool.get(workspaceId)?.setCallbacks(callbacks)
 }
 

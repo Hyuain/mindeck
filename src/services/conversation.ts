@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
-import type { Message } from "@/types"
+import type { Message, ToolCall } from "@/types"
 
 interface JsonlMessage {
   id: string
@@ -9,6 +9,9 @@ interface JsonlMessage {
   providerId?: string
   timestamp: string
   metadata?: Record<string, unknown>
+  toolCalls?: ToolCall[]
+  toolCallId?: string
+  toolName?: string
 }
 
 function fromJsonl(m: JsonlMessage): Message {
@@ -20,6 +23,9 @@ function fromJsonl(m: JsonlMessage): Message {
     providerId: m.providerId,
     timestamp: m.timestamp,
     metadata: m.metadata,
+    toolCalls: m.toolCalls,
+    toolCallId: m.toolCallId,
+    toolName: m.toolName,
   }
 }
 
@@ -32,6 +38,9 @@ function toJsonl(m: Message): JsonlMessage {
     providerId: m.providerId,
     timestamp: m.timestamp,
     metadata: m.metadata as Record<string, unknown> | undefined,
+    toolCalls: m.toolCalls,
+    toolCallId: m.toolCallId,
+    toolName: m.toolName,
   }
 }
 

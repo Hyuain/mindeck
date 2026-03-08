@@ -17,20 +17,14 @@ import {
   Eraser,
 } from "lucide-react"
 import { useMajordomoStore } from "@/stores/majordomo"
+import { useChatStore } from "@/stores/chat"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useProviderStore } from "@/stores/provider"
 import { useSkillsStore } from "@/stores/skills"
 import { useLayoutStore } from "@/stores/layout"
 import { useTaskStore } from "@/stores/tasks"
-import {
-  makeMessage,
-  appendMajordomoMessage,
-  clearMajordomoMessages,
-} from "@/services/conversation"
-import { runAgentLoop, type AgentLoopResult } from "@/services/agentic-loop"
-import { getToolDefinitions } from "@/services/tools/registry"
-import { eventBus } from "@/services/event-bus"
-import { createLogger } from "@/services/logger"
+import { MAJORDOMO_WS_ID, clearMajordomoMessages } from "@/services/conversation"
+import { majordomoAgent } from "@/services/majordomo-agent"
 import { resolvePermission, resolveAllPermissions } from "@/services/permissions"
 import { retryTask } from "@/services/task-manager"
 import {
@@ -42,7 +36,7 @@ import {
 import { saveSkill, deleteSkill } from "@/services/skills"
 import { ToolActivityRow } from "./ToolActivityRow"
 import { SkillEditorModal } from "./SkillEditorModal"
-import type { Task, WorkspaceSummary, Model, Skill, TaskResultEvent } from "@/types"
+import type { Task, WorkspaceSummary, Model, Skill } from "@/types"
 
 const TASK_STATUS_COLOR: Record<string, string> = {
   pending: "var(--color-t2)",
@@ -66,23 +60,17 @@ interface MajordomoPanelProps {
 
 export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
   const {
-    messages,
     isStreaming,
-    appendMessage,
-    pushMessageDraft,
-    updateLastMessage,
-    removeDraftIfEmpty,
-    setStreaming,
-    clearMessages: clearMjMessages,
     workspaceSummaries,
     selectedProviderId,
     selectedModelId,
     setModel,
     activeToolActivities,
     pendingPermissions,
-    setToolActivity,
-    clearToolActivities,
   } = useMajordomoStore()
+
+  // Read Majordomo messages from useChatStore (Phase 3.2)
+  const messages = useChatStore((state) => state.messages[MAJORDOMO_WS_ID] ?? [])
   const {
     workspaces,
     activeWorkspaceId,
@@ -102,13 +90,9 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
   const [confirmTarget, setConfirmTarget] = useState<{ id: string; name: string } | null>(
     null
   )
-  const abortRef = useRef<AbortController | null>(null)
   const msgsEndRef = useRef<HTMLDivElement>(null)
   const msgsContainerRef = useRef<HTMLDivElement>(null)
   const isMjNearBottomRef = useRef(true)
-  // Ref keeps the digest handler stable for event subscription while
-  // always calling the latest closure (fresh provider/model state).
-  const digestRef = useRef<(event: TaskResultEvent) => Promise<void>>(async () => {})
 
   // Auto-select the first provider/model when providers load and nothing is selected
   useEffect(() => {
@@ -222,283 +206,14 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
     }
   }
 
-  function buildSystemPrompt(customPrompt?: string): string {
-    const summaryText = workspaces
-      .map((ws) => {
-        const sum = workspaceSummaries.find((s) => s.workspaceId === ws.id)
-        return `[${ws.name}] status=${ws.status} summary="${sum?.snippet ?? ws.stateSummary ?? "no activity yet"}"`
-      })
-      .join("\n")
-    const defaultSystem = `You are Majordomo, a global cross-workspace assistant for Mindeck. You have visibility into all workspaces.\n\nCurrent workspace states:\n${summaryText}\n\nBe concise. Reference workspaces by name. Help the user orchestrate their work.\n\nCRITICAL TOOL-USE RULES — VIOLATIONS WILL BE CAUGHT AND REJECTED:\n1. To send work to a workspace, you MUST produce a tool function call for \`dispatch_to_workspace\`. Writing text about dispatching does NOT dispatch — only a real tool call does. The system audits every turn; fake dispatches are automatically detected and rejected.\n2. NEVER write "已派发", "I've dispatched", "task sent", "re-dispatching", "taskId:" or similar UNLESS a tool call was actually produced in this turn. If you describe dispatching without calling the tool, the system will force a retry.\n3. When you want to dispatch, respond ONLY with the tool call — do NOT also write confirmation text. The tool result will confirm success.\n4. If you cannot produce a tool call for any reason, say "I was unable to call the tool" — never pretend you did.\n5. NEVER reproduce system audit lines like "[audit]" or "[Tools actually called:]" in your output.`
-    return customPrompt ?? defaultSystem
-  }
-
-  /**
-   * Core: run a Majordomo turn with a given history.
-   * Handles streaming, tool calls, and persistence.
-   * @param extraUserContent - injected into history as a user message but NOT rendered in UI
-   */
-  async function runTurn(
-    systemPrompt: string,
-    tools: ReturnType<typeof getToolDefinitions>,
-    isDigest = false,
-    extraUserContent?: string,
-    retryCount = 0
-  ): Promise<void> {
-    const provider = providers.find((p) => p.id === selectedProviderId) ?? providers[0]
-    if (!provider) return
-
-    const modelId =
-      (selectedModelId || provider.defaultModel) ?? provider.models?.[0]?.id ?? "llama3.2"
-
-    // Use FRESH store state so we never have stale-closure history issues
-    const freshMessages = useMajordomoStore.getState().messages
-    const mapped = freshMessages
-      .filter(
-        (m) =>
-          m.role === "user" ||
-          m.role === "assistant" ||
-          (m.role === "system" && m.metadata?.isResultCard)
-      )
-      .map((m) => {
-        // Map result cards into user-role context so the LLM remembers past task results
-        if (m.role === "system" && m.metadata?.isResultCard) {
-          const wsId = m.metadata.workspaceId as string | undefined
-          const wsLabel =
-            useWorkspaceStore.getState().workspaces.find((w) => w.id === wsId)?.name ??
-            wsId ??
-            "Workspace"
-          const summary =
-            (m.metadata.fullResult as string | undefined)?.slice(0, 600) ??
-            m.content.slice(0, 600)
-          return {
-            role: "user" as const,
-            content: `[System: "${wsLabel}" completed task and reported result]\n${summary}`,
-          }
-        }
-        // Strip any fake tool-audit annotations the model may have mimicked
-        const content = m.content.replace(/\n?\[Tools actually called:[^\]]*\]/g, "")
-        return {
-          role: m.role as "user" | "assistant",
-          content,
-        }
-      })
-
-    // Inject tool-use audit as a separate system reminder between turns so the
-    // model cannot easily mimic it (it never appears inside assistant text).
-    const withAudit: Array<{ role: "system" | "user" | "assistant"; content: string }> =
-      []
-    let msgIdx = 0
-    for (const entry of mapped) {
-      withAudit.push(entry)
-      // After each assistant turn, check if tools were actually called
-      if (entry.role === "assistant") {
-        const orig = freshMessages.filter(
-          (fm) =>
-            fm.role === "user" ||
-            fm.role === "assistant" ||
-            (fm.role === "system" && fm.metadata?.isResultCard)
-        )[msgIdx]
-        if (orig?.role === "assistant" && orig.metadata) {
-          const called = orig.metadata.toolsCalled as string[] | undefined
-          if (called && called.length > 0) {
-            withAudit.push({
-              role: "system" as const,
-              content: `[audit] The preceding assistant turn executed tool calls: ${called.join(", ")}. This audit line is injected by the system — do NOT reproduce it.`,
-            })
-          }
-        }
-      }
-      msgIdx++
-    }
-
-    const history = [
-      { role: "system" as const, content: systemPrompt },
-      ...withAudit,
-      // Extra user message injected for LLM context only — not stored/displayed
-      ...(extraUserContent ? [{ role: "user" as const, content: extraUserContent }] : []),
-    ]
-
-    const aiMsg = makeMessage("assistant", "", modelId, provider.id)
-    pushMessageDraft(aiMsg)
-    setStreaming(true)
-
-    abortRef.current?.abort()
-    abortRef.current = new AbortController()
-
-    const providerType =
-      providers.find((p) => p.id === selectedProviderId)?.type ?? provider.type ?? ""
-
-    let full = ""
-    let loopResult: AgentLoopResult | undefined
-    try {
-      loopResult = await runAgentLoop({
-        providerId: provider.id,
-        providerType,
-        modelId,
-        history,
-        tools,
-        signal: abortRef.current.signal,
-        onChunk: (delta) => {
-          full += delta
-          updateLastMessage({ content: full })
-        },
-        onToolStart: (activity) => setToolActivity(activity),
-        onToolEnd: (activity) => setToolActivity(activity),
-      })
-    } catch (err: unknown) {
-      if ((err as Error)?.name !== "AbortError") {
-        updateLastMessage({ content: `Error: ${(err as Error).message}` })
-        full = `Error: ${(err as Error).message}`
-      }
-    } finally {
-      setStreaming(false)
-
-      // Strip any fake tool-audit annotations the model reproduced
-      full = full.replace(/\n?\[Tools actually called:[^\]]*\]/g, "")
-      full = full.replace(/\n?\[audit\][^\n]*/g, "")
-
-      // Detect fake dispatches: text mentions dispatching but no tool was called
-      const dispatchMentioned =
-        full &&
-        /dispatch|派发|已派发|dispatched|re-dispatch/i.test(full) &&
-        tools.length > 0
-      const actuallyDispatched = loopResult?.toolsCalled.includes("dispatch_to_workspace")
-
-      if (dispatchMentioned && !actuallyDispatched && !isDigest && retryCount < 1) {
-        // Auto-retry: remove the draft, inject a correction, and retry once
-        removeDraftIfEmpty()
-        const correctionMsg = makeMessage(
-          "user",
-          "⚠️ Your previous response described dispatching but did NOT actually call the dispatch_to_workspace tool. Text alone does NOT dispatch. You MUST use the tool function call. Try again now — call the tool, do not just describe it."
-        )
-        appendMessage(correctionMsg)
-        await appendMajordomoMessage(correctionMsg).catch(console.warn)
-        retryCount++
-        // Re-run the turn (recursive — retryCount prevents infinite loop)
-        await runTurn(systemPrompt, tools, false, undefined, retryCount)
-        return
-      }
-
-      if (dispatchMentioned && !actuallyDispatched && !isDigest) {
-        full +=
-          "\n\n⚠️ *The dispatch_to_workspace tool was not called. The task was NOT sent. This may be a model limitation — try a different model or resend your request.*"
-        updateLastMessage({ content: full })
-      }
-
-      if (full.trim()) {
-        const metadata: Record<string, unknown> = {}
-        if (loopResult && loopResult.toolsCalled.length > 0) {
-          metadata.toolsCalled = loopResult.toolsCalled
-        }
-        appendMajordomoMessage({ ...aiMsg, content: full, metadata }).catch(console.warn)
-      } else if (isDigest) {
-        removeDraftIfEmpty()
-      }
-
-      // Drain any digest events that queued while we were streaming
-      drainPendingDigests()
-    }
-  }
-
-  function drainPendingDigests() {
-    const queued = pendingDigestRef.current.splice(0)
-    if (queued.length === 0) return
-    // Process sequentially to avoid overlapping LLM calls
-    queued.reduce<Promise<void>>(
-      (chain, ev) =>
-        chain.then(() =>
-          Promise.resolve(digestRef.current(ev)).catch((err: unknown) => {
-            createLogger("MajordomoPanel").error("queued digest failed", err)
-          })
-        ),
-      Promise.resolve()
-    )
-  }
-
   async function handleSend() {
     const content = input.trim()
     if (!content || isStreaming) return
     setInput("")
-    clearToolActivities()
 
     const activeSkill = skills.find((s) => s.id === activeSkillId)
-    const systemPrompt = buildSystemPrompt(activeSkill?.systemPrompt)
-
-    // Persist + add user message BEFORE building history so fresh state includes it
-    const userMsg = makeMessage("user", content)
-    appendMessage(userMsg)
-
-    const provider = providers.find((p) => p.id === selectedProviderId) ?? providers[0]
-    if (!provider) {
-      appendMessage(
-        makeMessage(
-          "assistant",
-          "No providers configured. Open Settings (⌘,) to add a model."
-        )
-      )
-      return
-    }
-
-    const toolNames = activeSkill?.tools
-    const tools = getToolDefinitions(toolNames)
-    await runTurn(systemPrompt, tools)
+    await majordomoAgent.send(content, workspaces, summaries, activeSkill)
   }
-
-  /** Pending digest events queued while Majordomo was streaming */
-  const pendingDigestRef = useRef<TaskResultEvent[]>([])
-
-  /**
-   * Triggered automatically when a workspace reports results.
-   * Generates a brief Majordomo summary of the completed task.
-   * If Majordomo is currently streaming, the digest is queued and
-   * drained when the stream finishes.
-   */
-  async function handleDigest(event: TaskResultEvent) {
-    if (!event.result.trim()) return
-
-    // Queue if currently streaming — will be drained in runTurn's finally block
-    if (useMajordomoStore.getState().isStreaming) {
-      pendingDigestRef.current.push(event)
-      return
-    }
-
-    const { workspaces: ws } = useWorkspaceStore.getState()
-    const workspaceName =
-      ws.find((w) => w.id === event.workspaceId)?.name ?? event.workspaceId
-
-    const freshSummaryText = ws
-      .map(
-        (w) =>
-          `[${w.name}] status=${w.status} summary="${w.stateSummary ?? "no activity yet"}"`
-      )
-      .join("\n")
-    const digestPrompt =
-      `You are Majordomo, a global cross-workspace assistant for Mindeck. You have visibility into all workspaces.\n\nCurrent workspace states:\n${freshSummaryText}\n\nBe concise. Reference workspaces by name. Help the user orchestrate their work.` +
-      `\n\nA workspace just completed a delegated task and reported back. Briefly summarize what was accomplished (1-3 sentences). Always acknowledge completion. Do NOT offer to dispatch more tasks or take actions — you have NO tools in this turn.`
-
-    const triggerContent = `[System: "${workspaceName}" completed its task and reported results]\n\n${event.result}`
-
-    clearToolActivities()
-    await runTurn(digestPrompt, [], true, triggerContent)
-  }
-
-  // Keep ref current on every render so the event listener always calls
-  // the latest version (with fresh provider/model closure values)
-  digestRef.current = handleDigest
-
-  // Subscribe to workspace result events — only once on mount
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const mjLog = createLogger("MajordomoPanel")
-    const unsub = eventBus.on("task:result", (event) => {
-      mjLog.debug("task:result received", { dispatchId: event.dispatchId })
-      Promise.resolve(digestRef.current(event)).catch((err: unknown) => {
-        mjLog.error("handleDigest failed", err)
-      })
-    })
-    return unsub
-  }, [])
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -509,7 +224,7 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
 
   async function executeClearContext() {
     setConfirmClear(false)
-    clearMjMessages()
+    useChatStore.getState().clearMessages(MAJORDOMO_WS_ID)
     clearMajordomoMessages().catch(console.warn)
   }
 
@@ -598,7 +313,6 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
         <div className="mj-head-row">
           <div className="mj-icon">✦</div>
           <span className="mj-title">Majordomo</span>
-          <span className="mj-global">global</span>
           <button
             className="mj-clear-btn"
             onClick={() => setConfirmClear(true)}

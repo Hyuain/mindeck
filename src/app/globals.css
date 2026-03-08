@@ -464,10 +464,6 @@ body {
   font-size: 12px; flex-shrink: 0; color: var(--color-mj);
 }
 .mj-title { font-size: 12.5px; font-weight: 600; color: var(--color-t0); flex: 1; }
-.mj-global {
-  font-size: 9.5px; font-family: var(--font-mono); color: var(--color-t2);
-  background: var(--color-bg-3); padding: 2px 6px; border-radius: 3px; border: 1px solid var(--color-bdd);
-}
 .mj-clear-btn {
   margin-left: auto; width: 20px; height: 20px; border-radius: 3px; border: none;
   background: transparent; color: var(--color-t2); cursor: pointer;
@@ -738,6 +734,31 @@ body {
   color: var(--color-t1); font-style: italic;
   background: color-mix(in srgb, var(--color-bg-1) 60%, transparent);
   border-top: 1px solid var(--color-bd);
+}
+/* Tool result bubble — collapsible panel for role:"tool" messages */
+.tool-result-bubble {
+  margin: 2px 0; border: 1px solid var(--color-bd); border-radius: 6px;
+  overflow: hidden; font-size: 11px;
+}
+.tool-result-bubble.tool-result-error { border-color: #f87171; }
+.tool-result-toggle {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 5px 8px; background: var(--color-bg-2);
+  border: none; cursor: pointer; text-align: left;
+  color: var(--color-t1); font-size: 11px; font-family: var(--font-sans);
+}
+.tool-result-toggle:hover { background: var(--color-bg-3); }
+.tool-result-error .tool-result-toggle { background: color-mix(in srgb, #f87171 8%, var(--color-bg-2)); }
+.tool-result-icon { font-size: 10px; color: var(--color-ac); line-height: 1; }
+.tool-result-error .tool-result-icon { color: #f87171; }
+.tool-result-name { flex: 1; font-weight: 500; font-family: var(--font-mono); color: var(--color-t0); }
+.tool-result-chevron { font-size: 8px; color: var(--color-t2); }
+.tool-result-body { border-top: 1px solid var(--color-bd); }
+.tool-result-content {
+  margin: 0; padding: 7px 10px; font-size: 10.5px; font-family: var(--font-mono);
+  color: var(--color-t1); white-space: pre-wrap; word-break: break-all;
+  max-height: 240px; overflow-y: auto;
+  background: color-mix(in srgb, var(--color-bg-1) 60%, transparent);
 }
 .chat-foot { flex-shrink: 0; padding: 10px 12px; border-top: 1px solid var(--color-bdd); }
 .input-box {

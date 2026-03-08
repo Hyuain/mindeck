@@ -6,3 +6,4 @@ pub mod stream;
 pub mod files;
 pub mod shell;
 pub mod skills;
+pub mod events;

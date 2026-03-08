@@ -5,6 +5,7 @@ import remarkBreaks from "remark-breaks"
 import rehypeHighlight from "rehype-highlight"
 import type { Message } from "@/types"
 import { AgentTag } from "./AgentTag"
+import { ToolResultBubble } from "./ToolResultBubble"
 
 interface MessageBubbleProps {
   message: Message
@@ -81,6 +82,11 @@ function ThinkingBlock({ content }: { content: string }) {
 }
 
 export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
+  // Tool result messages get their own compact collapsible UI
+  if (message.role === "tool") {
+    return <ToolResultBubble message={message} />
+  }
+
   const isUser = message.role === "user"
   const isFromMajordomo = isUser && message.metadata?.source === "majordomo"
   const isSubAgent = message.role === "assistant" && !!message.metadata?.agentId

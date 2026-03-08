@@ -1,9 +1,19 @@
 // ─── Provider ────────────────────────────────────────────────
 
+export interface ModelCapabilities {
+  /** How well this model handles function/tool calling */
+  functionCalling?: "native" | "weak" | "none"
+  /** Whether the model supports extended thinking / reasoning */
+  thinking?: boolean
+  /** Whether the model accepts image inputs */
+  vision?: boolean
+}
+
 export interface Model {
   id: string
   name: string
   contextLength?: number
+  capabilities?: ModelCapabilities
 }
 
 export interface ProviderConfig {
@@ -69,7 +79,7 @@ export interface FileNode {
 }
 
 // ─── Conversation / Messages ──────────────────────────────────
-export type MessageRole = "user" | "assistant" | "system"
+export type MessageRole = "user" | "assistant" | "system" | "tool"
 
 /** Who initiated this message */
 export type MessageSource = "user" | "majordomo" | "sub-agent" | "system"
@@ -94,6 +104,12 @@ export interface Message {
   providerId?: string
   timestamp: string
   metadata?: MessageMetadata
+  /** Tool calls made by this assistant turn (role: "assistant" with tool calls) */
+  toolCalls?: ToolCall[]
+  /** For role: "tool" — the call ID this result belongs to */
+  toolCallId?: string
+  /** For role: "tool" — name of the tool that produced this result */
+  toolName?: string
 }
 
 // ─── Preview / Renderers ──────────────────────────────────────

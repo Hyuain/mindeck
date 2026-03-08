@@ -6,6 +6,7 @@ import { useWorkspaceStore } from "@/stores/workspace"
 import { useProviderStore } from "@/stores/provider"
 import { useSkillsStore } from "@/stores/skills"
 import { useMajordomoStore, initMajordomoResultListener } from "@/stores/majordomo"
+import { useChatStore } from "@/stores/chat"
 import { useLayoutStore } from "@/stores/layout"
 import { useColumnResize } from "@/hooks/useColumnResize"
 import { initAppDirs } from "@/services/providers/storage"
@@ -13,7 +14,7 @@ import { listWorkspaces, createWorkspace, newWorkspace } from "@/services/worksp
 import { listProviders } from "@/services/providers/storage"
 import { listSkills } from "@/services/skills"
 import { registerBuiltins } from "@/services/tools/builtins"
-import { loadMajordomoMessages } from "@/services/conversation"
+import { loadMajordomoMessages, MAJORDOMO_WS_ID } from "@/services/conversation"
 import { agentPool } from "@/services/agent-pool"
 import { MajordomoPanel } from "@/components/majordomo/MajordomoPanel"
 import { ChatPanel } from "@/components/chat/ChatPanel"
@@ -37,7 +38,9 @@ export default function App() {
   } = useWorkspaceStore()
   const { setProviders } = useProviderStore()
   const { setSkills } = useSkillsStore()
-  const { setMessages: setMajordomoMessages } = useMajordomoStore()
+  // useMajordomoStore still needed for initMajordomoResultListener (called in bootstrap)
+  useMajordomoStore()
+  const setMajordomoMessages = useChatStore((state) => state.setMessages)
   const {
     majordomoWidth,
     rightPanelWidth,
@@ -104,7 +107,7 @@ export default function App() {
         setWorkspaces(wsList)
         setProviders(provList)
         setSkills(skillsList)
-        setMajordomoMessages(majordomoMsgs)
+        setMajordomoMessages(MAJORDOMO_WS_ID, majordomoMsgs)
 
         // Connect pool agents for all workspaces so dispatches work
         // regardless of which workspace is currently visible in the UI

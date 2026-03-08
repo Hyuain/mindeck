@@ -5,7 +5,7 @@
  * Always runs the full agentic loop (tools, multi-turn) unless explicitly disabled.
  * Reports results back to Majordomo via event bus.
  */
-import { runAgentLoop } from "./agentic-loop"
+import { runAgent, messagesToAgentHistory } from "./agent-runner"
 import { eventBus } from "./event-bus"
 import { appendMessage, makeMessage } from "./conversation"
 import { getToolDefinitions } from "./tools/registry"
@@ -13,18 +13,28 @@ import { createWorkspaceTools } from "./tools/workspace-tools"
 import { streamChat } from "./providers/bridge"
 import { createLogger } from "./logger"
 import { updateTaskStatus, recoverPendingTasks } from "./task-manager"
+import { loadPendingDispatches, markEventProcessed } from "./event-queue"
 import { setPermissionContext } from "./permissions"
 import { resolveContentRoot } from "@/components/workspace/WorkspacePanel"
 import { useWorkspaceStore } from "@/stores/workspace"
-import { useChatStore } from "@/stores/chat"
-import { useProviderStore } from "@/stores/provider"
+import { useTaskStore } from "@/stores/tasks"
 import type {
   AgentMessage,
   Message,
   MessageSource,
+  ModelCapabilities,
+  ProviderConfig,
   ToolActivity,
   Workspace,
 } from "@/types"
+
+export interface AgentDeps {
+  getMessages: (workspaceId: string) => Message[]
+  appendMessage: (workspaceId: string, msg: Message) => void
+  updateLastMessage: (workspaceId: string, patch: Partial<Message>) => void
+  getProvider: (providerId: string) => ProviderConfig | undefined
+  setStreaming: (workspaceId: string, streaming: boolean) => void
+}
 
 export interface UICallbacks {
   onChunk?: (delta: string) => void
@@ -49,6 +59,15 @@ interface QueuedInput {
 // only Majordomo orchestrates cross-workspace delegation.
 const WORKSPACE_BLOCKED_TOOLS = ["dispatch_to_workspace"]
 
+/** Resolve the capability profile for the model the workspace is using. */
+function resolveModelCapabilities(
+  provider: ProviderConfig | undefined,
+  modelId: string
+): ModelCapabilities {
+  if (!provider) return {}
+  return provider.models?.find((m) => m.id === modelId)?.capabilities ?? {}
+}
+
 export class WorkspaceAgent {
   private readonly workspaceId: string
   private readonly log
@@ -58,7 +77,10 @@ export class WorkspaceAgent {
   private callbacks: UICallbacks = {}
   private abortController = new AbortController()
 
-  constructor(private workspace: Workspace) {
+  constructor(
+    private workspace: Workspace,
+    private deps: AgentDeps
+  ) {
     this.workspaceId = workspace.id
     this.log = createLogger(`WorkspaceAgent:${this.workspaceId}`)
   }
@@ -106,6 +128,28 @@ export class WorkspaceAgent {
         dispatchId: task.id,
       })
     }
+
+    // Recover missed events from disk (survives app restarts — best-effort)
+    loadPendingDispatches(this.workspaceId)
+      .then((events) => {
+        for (const ev of events) {
+          // Skip if TaskStore already knows about this task (picked up via memory recovery above)
+          const alreadyKnown = useTaskStore.getState().tasks.some((t) => t.id === ev.id)
+          if (!alreadyKnown) {
+            this.log.info("Recovering missed event from disk", { eventId: ev.id })
+            updateTaskStatus(ev.id, "received")
+            this.enqueue(ev.task, {
+              type: ev.sourceType,
+              dispatchId: ev.id,
+            })
+          }
+          // Mark processed regardless to prevent future double-pickup
+          markEventProcessed(this.workspaceId, ev.id).catch(() => {})
+        }
+      })
+      .catch((err: unknown) =>
+        this.log.warn("Failed to load pending events from disk", err)
+      )
   }
 
   /** Stop listening for dispatches */
@@ -164,9 +208,7 @@ export class WorkspaceAgent {
     } = workspace.agentConfig
 
     // Fix A: Validate provider before touching chat store or starting the LLM call
-    const providerExists = useProviderStore
-      .getState()
-      .providers.some((p) => p.id === providerId)
+    const providerExists = this.deps.getProvider(providerId) !== undefined
     if (!providerId || !providerExists) {
       this.log.error("No valid provider configured", {
         providerId,
@@ -184,8 +226,11 @@ export class WorkspaceAgent {
     }
 
     // Look up providerType so MiniMax gets correct message formatting
-    const providerType =
-      useProviderStore.getState().providers.find((p) => p.id === providerId)?.type ?? ""
+    const provider = this.deps.getProvider(providerId)
+    const providerType = provider?.type ?? ""
+
+    // Resolve the model's capability profile — drives tool injection and prompt tuning.
+    const modelCapabilities = resolveModelCapabilities(provider, modelId)
 
     // 1. Build and persist user message with source metadata
     const userMsg: Message = {
@@ -196,12 +241,7 @@ export class WorkspaceAgent {
       },
     }
 
-    const {
-      appendMessage: storeAppend,
-      updateLastMessage,
-      messages,
-    } = useChatStore.getState()
-    storeAppend(this.workspaceId, userMsg)
+    this.deps.appendMessage(this.workspaceId, userMsg)
     appendMessage(this.workspaceId, userMsg).catch((err: unknown) =>
       this.log.warn("Failed to persist user message", err)
     )
@@ -209,22 +249,19 @@ export class WorkspaceAgent {
     // 2. Build system prompt (includes project path, tools, context)
     const systemPrompt = await this.buildSystemPrompt(source)
 
-    // 3. Build conversation history as AgentMessage[]
-    const history: AgentMessage[] = [
-      { role: "system", content: systemPrompt },
-      ...[...(messages[this.workspaceId] ?? []), userMsg].map((m) => ({
-        role: m.role as "user" | "assistant" | "system",
-        content: m.content,
-      })),
-    ]
+    // 3. Build conversation history as AgentMessage[] — preserves tool call turns
+    const history: AgentMessage[] = messagesToAgentHistory([
+      ...this.deps.getMessages(this.workspaceId),
+      userMsg,
+    ])
 
     // 4. Placeholder AI message
     const aiMsg: Message = makeMessage("assistant", "", modelId, providerId)
-    storeAppend(this.workspaceId, aiMsg)
+    this.deps.appendMessage(this.workspaceId, aiMsg)
     this.callbacks.onStreamingChange?.(true)
 
     let fullContent = ""
-    let loopResult: Awaited<ReturnType<typeof runAgentLoop>> | undefined
+    let loopResult: Awaited<ReturnType<typeof runAgent>> | undefined
 
     // Always use the agentic loop so the agent has tool access.
     // Previously gated behind `enableAgentLoop` config, but user messages
@@ -260,17 +297,19 @@ export class WorkspaceAgent {
           ...wsTools.definitions,
         ]
         setPermissionContext(workspace.name)
-        loopResult = await runAgentLoop({
+        loopResult = await runAgent({
           providerId,
           providerType,
           modelId,
+          systemPrompt,
           history,
           tools: toolDefs,
           extraExecutors: wsTools.executors,
+          modelCapabilities,
           signal: this.abortController.signal,
           onChunk: (delta) => {
             fullContent += delta
-            updateLastMessage(this.workspaceId, { content: fullContent })
+            this.deps.updateLastMessage(this.workspaceId, { content: fullContent })
             this.callbacks.onChunk?.(delta)
           },
           onToolStart: this.callbacks.onToolStart ?? (() => {}),
@@ -281,7 +320,7 @@ export class WorkspaceAgent {
         // (e.g. max-iterations fallback message or tool-only response).
         if (!fullContent.trim() && loopResult.text.trim()) {
           fullContent = loopResult.text
-          updateLastMessage(this.workspaceId, { content: fullContent })
+          this.deps.updateLastMessage(this.workspaceId, { content: fullContent })
         }
       } else {
         // Simple streaming chat (no tools)
@@ -296,7 +335,7 @@ export class WorkspaceAgent {
           if (this.abortController.signal.aborted) break
           if (chunk.delta) {
             fullContent += chunk.delta
-            updateLastMessage(this.workspaceId, { content: fullContent })
+            this.deps.updateLastMessage(this.workspaceId, { content: fullContent })
             this.callbacks.onChunk?.(chunk.delta)
           }
         }
@@ -306,7 +345,7 @@ export class WorkspaceAgent {
       if (!isAbort) {
         const errText = err instanceof Error ? err.message : "Unknown error"
         this.log.error("Stream error", { errText, providerId, modelId })
-        updateLastMessage(this.workspaceId, { content: `Error: ${errText}` })
+        this.deps.updateLastMessage(this.workspaceId, { content: `Error: ${errText}` })
         fullContent = `Error: ${errText}`
       }
 
@@ -317,12 +356,47 @@ export class WorkspaceAgent {
       this.callbacks.onStreamingChange?.(false)
     }
 
-    // Detect fake actions: model describes file operations but never called tools
-    if (useAgentLoop && loopResult && retryCount < 1) {
-      const actionMentioned =
-        /移[入动]|已移|moved|已[创删复]|created|deleted|copied|mv |cp |mkdir |rm /i.test(
-          fullContent
+    // Persist intermediate tool-call turns (assistant turns + tool results)
+    // so the next session can reconstruct the full agentic history.
+    if (useAgentLoop && loopResult) {
+      for (const im of loopResult.intermediateMessages) {
+        const imMsg: Message =
+          im.role === "tool"
+            ? {
+                id: crypto.randomUUID(),
+                role: "tool",
+                content: im.content,
+                timestamp: new Date().toISOString(),
+                toolCallId: im.toolCallId,
+                toolName: im.name,
+              }
+            : {
+                id: crypto.randomUUID(),
+                role: "assistant" as const,
+                content: im.content,
+                timestamp: new Date().toISOString(),
+                model: modelId,
+                providerId,
+                toolCalls: im.role === "assistant" ? im.toolCalls : undefined,
+              }
+        appendMessage(this.workspaceId, imMsg).catch((err: unknown) =>
+          this.log.warn("Failed to persist intermediate message", err)
         )
+      }
+    }
+
+    // Detect fake actions: model describes file operations but never called tools.
+    // For models with weak function-calling, broaden the pattern — they more often
+    // produce text descriptions instead of tool calls even for simple actions.
+    if (useAgentLoop && loopResult && retryCount < 1) {
+      const isWeakFC = modelCapabilities.functionCalling === "weak"
+      const actionMentioned = isWeakFC
+        ? /移|创建|删除|复制|文件|目录|操作|执行|已完成|moved|created|deleted|copied|mv |cp |mkdir |rm |wrote|written/i.test(
+            fullContent
+          )
+        : /移[入动]|已移|moved|已[创删复]|created|deleted|copied|mv |cp |mkdir |rm /i.test(
+            fullContent
+          )
       const mutatingToolCalled = loopResult.toolsCalled.some((t) =>
         ["bash_exec", "write_file", "delete_path"].includes(t)
       )
@@ -342,7 +416,7 @@ export class WorkspaceAgent {
           ),
           metadata: { source: "system" as MessageSource },
         }
-        storeAppend(this.workspaceId, correctionMsg)
+        this.deps.appendMessage(this.workspaceId, correctionMsg)
         appendMessage(this.workspaceId, correctionMsg).catch(console.warn)
         // Retry the process with the correction injected into history
         return this.process(correctionMsg.content, source, retryCount + 1)
@@ -359,7 +433,7 @@ export class WorkspaceAgent {
       })
       fullContent =
         "(No response generated. Workspace agent may have a provider configuration issue.)"
-      updateLastMessage(this.workspaceId, { content: fullContent })
+      this.deps.updateLastMessage(this.workspaceId, { content: fullContent })
     }
 
     // 5. Persist complete AI message

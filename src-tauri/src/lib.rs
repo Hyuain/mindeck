@@ -48,6 +48,10 @@ pub fn run() {
             commands::skills::list_skills,
             commands::skills::save_skill,
             commands::skills::delete_skill,
+            // events
+            commands::events::append_event,
+            commands::events::load_pending_events,
+            commands::events::mark_event_processed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,6 +8,7 @@
 import { useTaskStore } from "@/stores/tasks"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { eventBus } from "./event-bus"
+import { enqueueTaskDispatch } from "./event-queue"
 import { createLogger } from "./logger"
 import type { Task, TaskStatus, MessageSource } from "@/types"
 
@@ -41,6 +42,16 @@ export function createTask(
     workspace: task.workspaceName,
     content: content.slice(0, 60),
   })
+
+  // Persist to disk for durability across app restarts (best-effort)
+  enqueueTaskDispatch({
+    id: task.id,
+    sourceType: task.sourceType,
+    targetWorkspaceId: task.workspaceId,
+    task: task.content,
+    priority: "normal",
+  }).catch((err: unknown) => log.warn("Failed to persist event to disk", err))
+
   return task
 }
 
