@@ -16,8 +16,11 @@ import { updateTaskStatus, recoverPendingTasks } from "./task-manager"
 import { loadPendingDispatches, markEventProcessed } from "./event-queue"
 import { setPermissionContext } from "./permissions"
 import { resolveContentRoot } from "@/components/workspace/WorkspacePanel"
+import { discoverWorkspaceSkills, loadFullSkill } from "./skills/skill-discovery"
+import { discoverContextRules, buildContextSection } from "./skills/context-injector"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useTaskStore } from "@/stores/tasks"
+import { useSkillsStore } from "@/stores/skills"
 import type {
   AgentMessage,
   Message,
@@ -53,6 +56,8 @@ export interface InputSource {
 interface QueuedInput {
   content: string
   source: InputSource
+  /** Skill IDs selected via slash command for this message only (not always-on) */
+  ephemeralSkillIds?: string[]
 }
 
 // Workspace agents must NOT dispatch to other workspaces —
@@ -150,6 +155,11 @@ export class WorkspaceAgent {
       .catch((err: unknown) =>
         this.log.warn("Failed to load pending events from disk", err)
       )
+
+    // Discover workspace skills (non-blocking; best-effort)
+    this.initWorkspaceContext().catch((err: unknown) =>
+      this.log.warn("Workspace context discovery failed", err)
+    )
   }
 
   /** Stop listening for dispatches */
@@ -161,8 +171,8 @@ export class WorkspaceAgent {
   }
 
   /** Accept user input (called by ChatPanel on send) */
-  send(content: string): void {
-    this.enqueue(content, { type: "user" })
+  send(content: string, ephemeralSkillIds?: string[]): void {
+    this.enqueue(content, { type: "user" }, ephemeralSkillIds)
   }
 
   /** Update workspace config (e.g. after model change) */
@@ -170,19 +180,23 @@ export class WorkspaceAgent {
     this.workspace = workspace
   }
 
-  private enqueue(content: string, source: InputSource): void {
+  private enqueue(
+    content: string,
+    source: InputSource,
+    ephemeralSkillIds?: string[]
+  ): void {
     if (this.processing) {
-      this.queue.push({ content, source })
+      this.queue.push({ content, source, ephemeralSkillIds })
       return
     }
-    this.processNext({ content, source })
+    this.processNext({ content, source, ephemeralSkillIds })
   }
 
   private async processNext(input: QueuedInput): Promise<void> {
     this.processing = true
 
     try {
-      await this.process(input.content, input.source)
+      await this.process(input.content, input.source, 0, input.ephemeralSkillIds)
     } catch (err: unknown) {
       this.log.error("Error during processing", err)
     } finally {
@@ -197,7 +211,8 @@ export class WorkspaceAgent {
   private async process(
     content: string,
     source: InputSource,
-    retryCount = 0
+    retryCount = 0,
+    ephemeralSkillIds?: string[]
   ): Promise<void> {
     const workspace = this.workspace
     const {
@@ -247,7 +262,7 @@ export class WorkspaceAgent {
     )
 
     // 2. Build system prompt (includes project path, tools, context)
-    const systemPrompt = await this.buildSystemPrompt(source)
+    const systemPrompt = await this.buildSystemPrompt(source, ephemeralSkillIds)
 
     // 3. Build conversation history as AgentMessage[] — preserves tool call turns
     const history: AgentMessage[] = messagesToAgentHistory([
@@ -281,6 +296,13 @@ export class WorkspaceAgent {
 
       if (useAgentLoop) {
         // Full agentic loop with tools (global builtins + workspace-specific tools)
+        // Resolve ephemeral skill IDs to Skill objects so load_skill can serve them
+        const allWsSkills =
+          useSkillsStore.getState().workspaceSkills[this.workspaceId] ?? []
+        const resolvedEphemeralSkills = (ephemeralSkillIds ?? [])
+          .map((id) => allWsSkills.find((s) => s.id === id))
+          .filter((s): s is (typeof allWsSkills)[number] => s !== undefined)
+
         const wsTools = createWorkspaceTools({
           providerId,
           providerType,
@@ -289,6 +311,7 @@ export class WorkspaceAgent {
           workspaceName: workspace.name,
           onSubAgentToolStart: this.callbacks.onToolStart ?? (() => {}),
           onSubAgentToolEnd: this.callbacks.onToolEnd ?? (() => {}),
+          ephemeralSkills: resolvedEphemeralSkills,
         })
         const toolDefs = [
           ...getToolDefinitions(allowedTools).filter(
@@ -472,10 +495,33 @@ export class WorkspaceAgent {
   }
 
   /**
-   * Build a system prompt that gives the agent context about its workspace,
-   * project directory, and available tools.
+   * Discover workspace skills and store them for system prompt injection.
+   * Called once on connect() — best-effort, non-blocking.
    */
-  private async buildSystemPrompt(source: InputSource): Promise<string> {
+  private async initWorkspaceContext(): Promise<void> {
+    const contentRoot = await resolveContentRoot(this.workspace).catch(
+      () => `~/.mindeck/workspaces/${this.workspaceId}/files`
+    )
+    const indices = await discoverWorkspaceSkills(contentRoot)
+    const skills = await Promise.all(
+      indices.map((idx) => loadFullSkill(idx).catch(() => null))
+    )
+    const validSkills = skills.filter((s): s is NonNullable<typeof s> => s !== null)
+    useSkillsStore.getState().setWorkspaceSkills(this.workspaceId, validSkills)
+    this.log.debug("Workspace skills discovered", {
+      count: validSkills.length,
+      contentRoot,
+    })
+  }
+
+  /**
+   * Build a system prompt that gives the agent context about its workspace,
+   * project directory, available tools, and any active skills / project rules.
+   */
+  private async buildSystemPrompt(
+    source: InputSource,
+    ephemeralSkillIds?: string[]
+  ): Promise<string> {
     const workspace = this.workspace
 
     // Use any explicitly configured system prompt as a base
@@ -500,7 +546,8 @@ You are receiving this task from Majordomo (the global orchestrator).
   report_to_majordomo(workspaceId="${workspace.id}", summary="...", details="...")`
       : ""
 
-    return `You are the AI agent for the workspace "${workspace.name}" (ID: ${workspace.id}).
+    const basePrompt =
+      `You are the AI agent for the workspace "${workspace.name}" (ID: ${workspace.id}).
 
 Project type: ${projectType}
 Project directory: ${contentRoot}
@@ -515,6 +562,7 @@ You have access to these tools:
 - report_to_majordomo(workspaceId, summary, details): Report results back to Majordomo
 - spawn_sub_agent(name, task): Spawn a temporary sub-agent to handle a focused subtask. The sub-agent runs autonomously and returns its result to you.
 - spawn_sub_agent_team(agents): Spawn multiple sub-agents IN PARALLEL. Pass an array of {name, task} objects. All sub-agents run simultaneously and their results are returned together. Use this to parallelize independent subtasks (e.g. one sub-agent per topic, file, or software).
+- load_skill(name): Load a named active skill's full instructions into context
 
 CRITICAL RULES — EVERY TURN IS AUDITED:
 1. To perform ANY file operation (move, copy, create, delete, rename), you MUST call the appropriate tool (bash_exec, write_file, delete_path, etc.). Writing text about an action does NOT perform it.
@@ -524,5 +572,42 @@ CRITICAL RULES — EVERY TURN IS AUDITED:
 5. Only report success AFTER tool results confirm the operation completed.
 ${majordomoInstructions}
 ${userPrompt ? `\nAdditional instructions:\n${userPrompt}` : ""}`.trim()
+
+    // ─── Context injection ────────────────────────────────────────
+    const sections: string[] = [basePrompt]
+
+    // Inject all project context rules (AGENTS.md, CLAUDE.md, .cursorrules, .windsurfrules, etc.)
+    try {
+      const contextRules = await discoverContextRules(contentRoot)
+      if (contextRules.length > 0) {
+        sections.push(`## Project Context\n\n${buildContextSection(contextRules)}`)
+      }
+    } catch {
+      // Discovery failure is non-fatal
+    }
+
+    // List active workspace skills — agent calls load_skill to get full content
+    const skillsStore = useSkillsStore.getState()
+    const alwaysOnSkills = skillsStore.getWorkspaceActiveSkills(this.workspaceId)
+    // Merge always-on skills with per-message ephemeral skills (deduplicated)
+    const allWorkspaceSkills = skillsStore.workspaceSkills[this.workspaceId] ?? []
+    const ephemeralSkills = (ephemeralSkillIds ?? [])
+      .map((id) => allWorkspaceSkills.find((s) => s.id === id))
+      .filter((s): s is (typeof allWorkspaceSkills)[number] => s !== undefined)
+    const alwaysOnIds = new Set(alwaysOnSkills.map((s) => s.id))
+    const combinedSkills = [
+      ...alwaysOnSkills,
+      ...ephemeralSkills.filter((s) => !alwaysOnIds.has(s.id)),
+    ]
+    if (combinedSkills.length > 0) {
+      const skillLines = combinedSkills
+        .map((s) => `- ${s.name}${s.description ? ` — ${s.description}` : ""}`)
+        .join("\n")
+      sections.push(
+        `## Available Skills\n\n${skillLines}\n\nUse the \`load_skill\` tool to load a skill's full instructions into context before applying it.`
+      )
+    }
+
+    return sections.join("\n\n")
   }
 }

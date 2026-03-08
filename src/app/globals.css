@@ -335,10 +335,10 @@ body {
 }
 .model-lbl b { color: var(--color-t0); font-weight: 500; }
 .model-dropdown {
-  position: absolute; top: calc(100% + 4px); left: 0; min-width: 220px;
+  min-width: 220px;
   background: var(--color-bg-2); border: 1px solid var(--color-bdh);
   border-radius: 8px; box-shadow: 0 8px 32px var(--color-shl);
-  z-index: 10; overflow: hidden; padding: 4px;
+  overflow: hidden; padding: 4px;
 }
 .model-group-label {
   font-size: 9.5px; font-family: var(--font-mono); text-transform: uppercase;
@@ -358,7 +358,7 @@ body {
 
 /* ─── SKILL DROPDOWN ─────────────────────────────────────── */
 .skill-option-row { display: flex; align-items: center; gap: 2px; }
-.skill-option-btn { flex: 1; }
+.skill-option-btn { flex: 1; display: flex; align-items: center; gap: 6px; }
 .skill-option-acts { display: flex; gap: 2px; padding-right: 4px; opacity: 0; transition: opacity 0.1s; }
 .skill-option-row:hover .skill-option-acts { opacity: 1; }
 .skill-act-btn {
@@ -378,12 +378,244 @@ body {
 }
 .skill-new-btn:hover { background: var(--color-bg-3); color: var(--color-t0); }
 
+/* ─── SLASH COMMAND DROPDOWN ─────────────────────────────── */
+.slash-dropdown {
+  background: var(--color-bg-2); border: 1px solid var(--color-bdh);
+  border-radius: 8px; box-shadow: 0 8px 32px var(--color-shl);
+  z-index: 20; overflow: hidden; padding: 4px;
+  max-height: 260px; overflow-y: auto;
+}
+.slash-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; text-align: left; padding: 7px 10px; border-radius: 5px; border: none;
+  background: transparent; cursor: pointer; transition: background 0.08s;
+}
+.slash-item:hover { background: var(--color-bg-3); }
+.slash-item.selected { background: var(--color-bg-3); }
+.slash-item-name {
+  font-size: 12px; font-family: var(--font-mono); color: var(--color-ac);
+  font-weight: 500;
+}
+.slash-item-desc {
+  font-size: 10.5px; font-family: var(--font-sans); color: var(--color-t2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+
 /* ─── SKILL EDITOR MODAL ─────────────────────────────────── */
-.skill-editor-sheet { width: 560px; max-height: 90vh; display: flex; flex-direction: column; }
+.skill-editor-sheet { width: 600px; max-height: 92vh; display: flex; flex-direction: column; }
 .skill-editor-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 0; flex: 1; overflow-y: auto; }
+.skill-editor-row { display: flex; gap: 12px; align-items: flex-start; }
 .skill-editor-ta {
-  resize: vertical; min-height: 180px; max-height: 380px;
+  resize: vertical; min-height: 160px; max-height: 340px;
   font-size: 11.5px; line-height: 1.6; white-space: pre-wrap;
+}
+
+/* ─── SKILLS TAB SPLIT LAYOUT ────────────────────────────── */
+.skills-tab-split {
+  display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden;
+}
+.skills-tab-top {
+  flex: 0 0 auto; max-height: 40%; overflow-y: auto; display: flex; flex-direction: column;
+}
+.skills-tab-divider {
+  height: 1px; background: var(--color-bdd); flex-shrink: 0;
+}
+.skills-tab-bottom {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0;
+}
+
+/* ─── MAJORDOMO SKILL CATALOG ────────────────────────────── */
+.msc-root { display: flex; flex-direction: column; }
+.msc-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px 5px;
+  font-size: 11px; color: var(--color-t1); font-weight: 500;
+  border-bottom: 1px solid var(--color-bdd);
+  flex-shrink: 0;
+}
+.msc-list { display: flex; flex-direction: column; }
+.msc-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 10px;
+  border-left: 2px solid transparent;
+  transition: background 0.1s;
+}
+.msc-row:hover { background: var(--color-bg-1); }
+.msc-row.active { border-left-color: var(--color-mj); background: color-mix(in srgb, var(--color-mj) 5%, transparent); }
+.msc-row.active.ac-workspace { border-left-color: var(--color-ac); background: color-mix(in srgb, var(--color-ac) 5%, transparent); }
+.msc-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+
+/* ─── WORKSPACE SKILL CATALOG ────────────────────────────── */
+.wsc-wrapper { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
+
+/* Header bar */
+.wsc-root { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.wsc-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--color-bdd);
+  flex-shrink: 0;
+}
+.wsc-header-left {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--color-t1); font-weight: 500;
+}
+.wsc-active-badge {
+  font-size: 10px; font-family: var(--font-mono);
+  background: color-mix(in srgb, var(--color-ac) 15%, transparent);
+  color: var(--color-ac); padding: 1px 6px; border-radius: 10px;
+}
+.wsc-refresh-btn {
+  width: 22px; height: 22px; border-radius: 4px;
+  border: none; background: transparent; color: var(--color-t2);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all 0.12s;
+}
+.wsc-refresh-btn:hover { background: var(--color-bg-2); color: var(--color-t0); }
+.wsc-refresh-btn.spinning svg { animation: wsc-spin 0.7s linear infinite; }
+@keyframes wsc-spin { to { transform: rotate(360deg); } }
+
+/* Discovery paths hint */
+.wsc-paths-hint {
+  padding: 5px 12px 7px;
+  font-size: 10px; color: var(--color-t2); line-height: 1.5;
+  border-bottom: 1px solid var(--color-bdd); flex-shrink: 0;
+}
+.wsc-paths-hint code {
+  font-family: var(--font-mono); font-size: 9.5px;
+  background: var(--color-bg-2); padding: 0 3px; border-radius: 2px;
+}
+
+/* Empty state */
+.wsc-empty {
+  padding: 24px 16px; display: flex; flex-direction: column; align-items: center;
+  gap: 8px; text-align: center;
+}
+.wsc-empty-title { font-size: 12px; color: var(--color-t1); font-weight: 500; }
+.wsc-empty-body {
+  font-size: 11px; color: var(--color-t2); line-height: 1.6; max-width: 200px;
+}
+.wsc-empty-body code {
+  font-family: var(--font-mono); font-size: 10px;
+  background: var(--color-bg-2); padding: 1px 4px; border-radius: 3px;
+}
+
+/* Card list */
+.wsc-list { display: flex; flex-direction: column; overflow-y: auto; flex: 1; }
+
+/* Individual skill card */
+.wsc-card {
+  border-bottom: 1px solid var(--color-bdd);
+  border-left: 2px solid transparent;
+  transition: background 0.1s, border-color 0.15s;
+}
+.wsc-card:hover { background: var(--color-bg-1); }
+.wsc-card.active {
+  border-left-color: var(--color-ac);
+  background: color-mix(in srgb, var(--color-ac) 5%, transparent);
+}
+/* Source-aware left border colors */
+.wsc-card[data-source=".agents"] { --src-color: #a78bfa; }
+.wsc-card[data-source=".claude"] { --src-color: #fb923c; }
+.wsc-card[data-source=".opencode"] { --src-color: #38bdf8; }
+.wsc-card[data-source=".mindeck"] { --src-color: var(--color-ac); }
+.wsc-card.active[data-source] { border-left-color: var(--src-color, var(--color-ac)); }
+
+.wsc-card-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 10px; min-height: 34px;
+}
+.wsc-chevron {
+  flex-shrink: 0; width: 14px; height: 14px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--color-t2);
+  cursor: pointer; border-radius: 2px; transition: color 0.1s;
+}
+.wsc-chevron:hover { color: var(--color-t0); }
+
+/* Toggle pill */
+.wsc-toggle {
+  flex-shrink: 0; width: 28px; height: 15px; border-radius: 8px;
+  border: 1px solid var(--color-bd); background: var(--color-bg-3);
+  cursor: pointer; position: relative; transition: background 0.18s, border-color 0.18s;
+}
+.wsc-toggle::after {
+  content: ""; position: absolute;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--color-bd); top: 1px; left: 1px;
+  transition: left 0.18s, background 0.18s;
+}
+.wsc-toggle.on { background: var(--color-ac); border-color: var(--color-ac); }
+.wsc-toggle.on::after { background: #fff; left: 14px; }
+
+/* Card meta */
+.wsc-card-meta {
+  display: flex; align-items: baseline; gap: 6px;
+  flex: 1; min-width: 0; overflow: hidden;
+}
+.wsc-card-name {
+  font-size: 12px; font-weight: 500; color: var(--color-t0);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0;
+}
+.wsc-card-desc {
+  font-size: 10.5px; color: var(--color-t2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wsc-version {
+  font-size: 9.5px; color: var(--color-t2); font-family: var(--font-mono);
+  background: var(--color-bg-2); padding: 1px 4px; border-radius: 3px; flex-shrink: 0;
+}
+
+/* Source badge — color-coded by tool origin */
+.wsc-source-badge {
+  flex-shrink: 0; font-size: 9.5px; font-family: var(--font-mono);
+  padding: 1px 5px; border-radius: 3px;
+  background: var(--color-bg-2); color: var(--color-t2);
+  border: 1px solid var(--color-bdd);
+}
+.wsc-source-badge.src-\.agents  { color: #a78bfa; border-color: color-mix(in srgb, #a78bfa 30%, transparent); }
+.wsc-source-badge.src-\.claude  { color: #fb923c; border-color: color-mix(in srgb, #fb923c 30%, transparent); }
+.wsc-source-badge.src-\.opencode { color: #38bdf8; border-color: color-mix(in srgb, #38bdf8 30%, transparent); }
+.wsc-source-badge.src-\.mindeck { color: var(--color-ac); border-color: color-mix(in srgb, var(--color-ac) 30%, transparent); }
+.wsc-source-badge.src-plugin { color: #94a3b8; border-color: color-mix(in srgb, #94a3b8 30%, transparent); }
+
+/* Expanded body */
+.wsc-card-body {
+  padding: 4px 10px 6px 42px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.wsc-meta-row { display: flex; align-items: center; gap: 4px; font-size: 10.5px; }
+.wsc-meta-k { color: var(--color-t2); }
+.wsc-meta-v { color: var(--color-t1); }
+
+.wsc-chip-row {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+}
+.wsc-chip-icon { color: var(--color-t2); flex-shrink: 0; }
+.wsc-chip {
+  font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  background: var(--color-bg-2); color: var(--color-t2);
+  font-family: var(--font-mono); border: 1px solid var(--color-bdd);
+}
+.wsc-chip-tool {
+  background: color-mix(in srgb, var(--color-ac) 8%, transparent);
+  color: var(--color-ac);
+  border-color: color-mix(in srgb, var(--color-ac) 25%, transparent);
+}
+.wsc-preview {
+  font-size: 10.5px; font-family: var(--font-mono); line-height: 1.5;
+  color: var(--color-t2); background: var(--color-bg-0);
+  border: 1px solid var(--color-bdd); border-radius: 4px;
+  padding: 8px 10px; margin: 0; white-space: pre-wrap; word-break: break-word;
+  max-height: 110px; overflow-y: auto;
+}
+
+/* Right-panel tab badge */
+.right-panel-tab-badge {
+  font-size: 9.5px; font-family: var(--font-mono);
+  background: var(--color-ac); color: #fff;
+  padding: 0 4px; border-radius: 8px; line-height: 14px;
+  min-width: 14px; text-align: center;
 }
 
 /* ─── APP SHELL ──────────────────────────────────────────── */
@@ -453,10 +685,10 @@ body {
   opacity: 0.5; pointer-events: none;
 }
 .mj-head {
-  padding: 10px 14px 8px; display: flex; flex-direction: column; gap: 7px;
+  padding: 10px 14px; display: flex; flex-direction: column;
   border-bottom: 1px solid var(--color-bdd); flex-shrink: 0;
 }
-.mj-head-row { display: flex; align-items: center; gap: 9px; }
+.mj-head-row { display: flex; align-items: center; gap: 7px; }
 .mj-icon {
   width: 24px; height: 24px; border-radius: 6px;
   background: var(--color-mj-dim); border: 1px solid var(--color-mj-border);
@@ -465,22 +697,35 @@ body {
 }
 .mj-title { font-size: 12.5px; font-weight: 600; color: var(--color-t0); flex: 1; }
 .mj-clear-btn {
-  margin-left: auto; width: 20px; height: 20px; border-radius: 3px; border: none;
+  width: 20px; height: 20px; border-radius: 3px; border: none;
   background: transparent; color: var(--color-t2); cursor: pointer;
   display: flex; align-items: center; justify-content: center; transition: all 0.1s;
+  flex-shrink: 0;
 }
 .mj-clear-btn:hover:not(:disabled) { background: var(--color-bg-3); color: var(--color-mj); }
 .mj-clear-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* Model chip — inline in header row */
+.mj-model-wrap { position: relative; flex-shrink: 0; }
 .mj-model-chip {
   display: flex; align-items: center; gap: 4px;
   padding: 3px 8px; border-radius: 4px; border: 1px solid var(--color-mj-border);
   background: var(--color-mj-dim); color: var(--color-mj);
   font-size: 10px; font-family: var(--font-mono); cursor: pointer;
-  width: 100%; transition: all 0.12s;
+  max-width: 130px; transition: all 0.12s;
 }
 .mj-model-chip:hover { border-color: var(--color-mj); background: rgba(167 139 250 / 0.14); }
 .mj-model-name {
   flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
+}
+
+/* Skill chip removed — skills managed via Skills catalog panel */
+
+.skill-opt-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-opt-badge {
+  font-size: 9px; font-family: var(--font-mono); padding: 1px 4px;
+  border-radius: 3px; background: var(--color-mj-dim); color: var(--color-mj);
+  border: 1px solid var(--color-mj-border); flex-shrink: 0;
 }
 .mj-ws-section { flex-shrink: 0; padding: 8px 0; border-bottom: 1px solid var(--color-bdd); }
 .mj-ws-header {
@@ -630,7 +875,7 @@ body {
 .mj-foot { flex-shrink: 0; padding: 10px; border-top: 1px solid var(--color-bdd); }
 .mj-input-box {
   background: var(--color-bg-3); border: 1px solid var(--color-bd);
-  border-radius: 8px; overflow: hidden; transition: border-color 0.15s;
+  border-radius: 8px; overflow: visible; transition: border-color 0.15s;
 }
 .mj-input-box:focus-within { border-color: var(--color-mj); }
 .mj-ta {
@@ -640,8 +885,34 @@ body {
 }
 .mj-ta::placeholder { color: var(--color-t2); }
 .mj-ta:disabled { opacity: 0.6; }
+
+/* ── Skill chips (shared between workspace + Majordomo input) ─────────────── */
+.input-chips { padding: 6px 10px 0; }
+.skill-chips-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.skill-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 5px 2px 6px; border-radius: 10px;
+  font-size: 11px; font-weight: 500; line-height: 1;
+}
+.skill-chip-ws {
+  background: color-mix(in srgb, var(--color-ac) 15%, transparent);
+  color: var(--color-ac);
+  border: 1px solid color-mix(in srgb, var(--color-ac) 35%, transparent);
+}
+.skill-chip-mj {
+  background: color-mix(in srgb, var(--color-mj) 15%, transparent);
+  color: var(--color-mj);
+  border: 1px solid color-mix(in srgb, var(--color-mj) 35%, transparent);
+}
+.skill-chip-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-chip-remove {
+  background: none; border: none; cursor: pointer; color: inherit;
+  opacity: 0.55; padding: 0 1px; font-size: 14px; line-height: 1;
+  display: flex; align-items: center;
+}
+.skill-chip-remove:hover { opacity: 1; }
 .mj-bar-row {
-  display: flex; align-items: center; padding: 5px 10px; border-top: 1px solid var(--color-bdd);
+  display: flex; align-items: center; justify-content: flex-end; padding: 5px 10px; border-top: 1px solid var(--color-bdd);
 }
 .mj-hint { font-size: 10px; color: var(--color-t2); font-family: var(--font-mono); flex: 1; }
 .mj-send {
@@ -1114,14 +1385,18 @@ body.is-resizing .right-panel {
   flex: 1; overflow-y: auto; display: flex; flex-direction: column;
 }
 .agent-tree { padding: 4px 0; }
+.agent-tree-node { display: flex; flex-direction: column; }
 .agent-tree-item {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 10px; cursor: pointer;
-  border: 1px solid transparent; transition: all 0.1s;
+  border: 1px solid transparent; border-radius: var(--radius-xs);
+  transition: all 0.1s;
 }
 .agent-tree-item:hover { background: var(--color-bg-2); }
 .agent-tree-item.selected { background: var(--color-ac-dim); border-color: var(--color-ac-border); }
 .agent-tree-item.dragging { opacity: 0.5; }
+.agent-tree-item.sub-agent-item { cursor: default; padding: 4px 10px; }
+.agent-tree-item.sub-agent-item:hover { background: var(--color-mj-dim); }
 .agent-tree-chevron {
   width: 14px; color: var(--color-t2); display: flex; flex-shrink: 0;
 }
@@ -1132,14 +1407,46 @@ body.is-resizing .right-panel {
   font-size: 10px; color: var(--color-ac); flex-shrink: 0;
 }
 .agent-tree-icon.sub-agent {
+  width: 18px; height: 18px;
   background: var(--color-mj-dim); border-color: var(--color-mj-border);
   color: var(--color-mj);
 }
 .agent-tree-label {
   font-size: 11px; color: var(--color-t0); flex: 1;
 }
+.agent-tree-label.sub-agent-label {
+  color: var(--color-t1); font-size: 10.5px;
+  font-family: var(--font-mono); letter-spacing: -0.01em;
+}
+.agent-tree-count {
+  font-size: 9px; font-family: var(--font-mono);
+  color: var(--color-mj); background: var(--color-mj-dim);
+  border: 1px solid var(--color-mj-border);
+  padding: 1px 5px; border-radius: 20px; flex-shrink: 0;
+}
+.agent-tree-connector {
+  width: 14px; height: 14px; flex-shrink: 0;
+  border-left: 1px solid var(--color-bd);
+  border-bottom: 1px solid var(--color-bd);
+  margin-left: 9px; border-radius: 0 0 0 3px;
+  align-self: flex-start; margin-top: -6px;
+}
+.agent-tree-status-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+}
+.agent-tree-status-dot.running {
+  background: var(--color-ac);
+  box-shadow: 0 0 4px var(--color-ac);
+  animation: agent-dot-pulse 1.4s ease-in-out infinite;
+}
+.agent-tree-status-dot.done { background: var(--color-t2); }
+.agent-tree-status-dot.error { background: #f87171; }
+@keyframes agent-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 .agent-tree-children {
-  padding-left: 20px;
+  padding-left: 10px;
 }
 .agent-tree-empty {
   padding: 12px; font-size: 11px; color: var(--color-t2); text-align: center;
@@ -1313,6 +1620,83 @@ body.is-resizing .right-panel {
   background: var(--color-bg-1);
   border-top: 1px solid var(--color-bd);
 }
+
+/* ─── TOOL ACTIVITY ROW ──────────────────────────────────── */
+.tar {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 5px 8px; border-radius: var(--radius-sm);
+  font-size: 11px; color: var(--color-t1);
+  border-left: 2px solid;
+}
+.tar-main {
+  background: color-mix(in srgb, var(--color-mj) 8%, transparent);
+  border-left-color: var(--color-mj);
+}
+.tar-sub-badge {
+  background: var(--color-ac-dim);
+  border-left-color: var(--color-ac);
+}
+.tar-sub-tool {
+  margin-left: 12px;
+  background: color-mix(in srgb, var(--color-mj) 5%, var(--color-ac-dim));
+  border-left-color: color-mix(in srgb, var(--color-mj) 60%, var(--color-ac));
+}
+.tar-error { color: #f87171; }
+.tar-running { opacity: 0.85; }
+
+.tar-header {
+  display: flex; align-items: center; gap: 5px;
+  user-select: none;
+}
+.tar-status {
+  flex-shrink: 0; width: 14px; text-align: center;
+  font-size: 10px; color: var(--color-t2);
+}
+.tar-spin { animation: tar-pulse 1.2s ease-in-out infinite; }
+@keyframes tar-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.tar-main .tar-name {
+  font-family: var(--font-sans); font-weight: 500;
+  color: var(--color-mj); flex-shrink: 0;
+}
+.tar-sub-badge .tar-name {
+  font-family: var(--font-sans); font-weight: 500;
+  color: var(--color-ac); flex-shrink: 0;
+}
+.tar-sub-tool .tar-name {
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: color-mix(in srgb, var(--color-mj) 70%, var(--color-ac));
+  flex-shrink: 0;
+}
+.tar-error .tar-name { color: #f87171; }
+
+.tar-args-preview {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--color-t2); flex: 1; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.tar-toggle {
+  margin-left: auto; color: var(--color-t2);
+  font-size: 8px; flex-shrink: 0;
+}
+
+.tar-detail {
+  padding-left: 19px; padding-top: 4px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.tar-detail-label {
+  font-size: 10px; color: var(--color-t2); margin-bottom: 2px;
+  font-family: var(--font-mono);
+}
+.tar-detail-label-err { color: #f87171; }
+.tar-detail-pre {
+  margin: 0; white-space: pre-wrap; word-break: break-all;
+  color: var(--color-t1);
+  background: color-mix(in srgb, var(--color-bg-2) 80%, transparent);
+  padding: 4px 6px; border-radius: var(--radius-xs);
+  font-family: var(--font-mono); font-size: 10px;
+}
+.tar-detail-pre-err { color: #f87171; }
 
 /* ─── MAJORDOMO TOOL ACTIVITIES ──────────────────────────── */
 .mj-tool-activities {

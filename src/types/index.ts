@@ -178,13 +178,56 @@ export type AgentMessage =
 
 // ─── Skills ──────────────────────────────────────────────────
 
+export type SkillSource =
+  | { type: "native"; path?: string }
+  | { type: "skill-md"; path: string }
+  | { type: "cursor-rule"; path: string }
+  | { type: "agents-md"; path: string }
+
+export interface SkillIndex {
+  id: string
+  name: string
+  description: string
+  source: SkillSource
+  path?: string
+}
+
+export type ContextRuleSource =
+  | "agents-md" // AGENTS.md  (priority 10 — universal standard)
+  | "claude-md" // CLAUDE.md  (priority 9  — Claude Code)
+  | "claude-local" // CLAUDE.local.md (priority 8 — personal, gitignored)
+  | "gemini-md" // GEMINI.md  (priority 8  — Gemini CLI)
+  | "cursor-rule" // .cursor/rules/*.md (priority 5 — Cursor dir)
+  | "cursorrules-file" // .cursorrules (priority 4 — Cursor legacy)
+  | "windsurf-rule" // .windsurf/rules/*.md (priority 4 — Windsurf dir)
+  | "windsurfrules-file" // .windsurfrules (priority 4 — Windsurf flat)
+  | "copilot-instructions" // .github/copilot-instructions.md (priority 3 — Copilot)
+
+export interface ContextRule {
+  content: string
+  source: ContextRuleSource
+  path: string
+  priority: number
+}
+
 export interface Skill {
   id: string
   name: string
   description: string
+  /** Primary instructions field (SKILL.md body / new format) */
+  instructions?: string
+  /** Legacy field — kept for Majordomo compat; maps from instructions */
   systemPrompt: string
-  /** Subset of tool names; undefined = all tools */
+  /** Subset of tool names; undefined = all tools (legacy) */
   tools?: string[]
+  /** Subset of tool names from SKILL.md allowed-tools */
+  allowedTools?: string[]
+  version?: string
+  author?: string
+  tags?: string[]
+  license?: string
+  source?: SkillSource
+  scope?: "global" | "workspace"
   createdAt: string
   updatedAt: string
 }
@@ -261,4 +304,8 @@ export interface TaskResultEvent {
   result: string
   /** Short summary (≤200 chars) for Majordomo display */
   summary: string
+}
+
+export interface WorkspaceDeletedEvent {
+  workspaceId: string
 }

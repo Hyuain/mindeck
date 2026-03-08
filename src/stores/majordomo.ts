@@ -29,6 +29,7 @@ interface MajordomoState {
   clearToolActivities: () => void
   addPermissionRequest: (req: PermissionRequest) => void
   removePermissionRequest: (id: string) => void
+  deleteWorkspaceSummary: (workspaceId: string) => void
 }
 
 export const useMajordomoStore = create<MajordomoState>((set) => ({
@@ -78,6 +79,13 @@ export const useMajordomoStore = create<MajordomoState>((set) => ({
   removePermissionRequest: (id) =>
     set((state) => ({
       pendingPermissions: state.pendingPermissions.filter((r) => r.id !== id),
+    })),
+
+  deleteWorkspaceSummary: (workspaceId) =>
+    set((state) => ({
+      workspaceSummaries: state.workspaceSummaries.filter(
+        (s) => s.workspaceId !== workspaceId
+      ),
     })),
 }))
 

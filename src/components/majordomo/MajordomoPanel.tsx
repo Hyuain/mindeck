@@ -7,12 +7,10 @@ import rehypeHighlight from "rehype-highlight"
 import {
   ChevronDown,
   FolderOpen,
-  Pencil,
   Plus,
   RotateCcw,
   SendHorizontal,
   ShieldAlert,
-  Trash2,
   X,
   Eraser,
 } from "lucide-react"
@@ -25,6 +23,7 @@ import { useLayoutStore } from "@/stores/layout"
 import { useTaskStore } from "@/stores/tasks"
 import { MAJORDOMO_WS_ID, clearMajordomoMessages } from "@/services/conversation"
 import { majordomoAgent } from "@/services/majordomo-agent"
+import { eventBus } from "@/services/event-bus"
 import { resolvePermission, resolveAllPermissions } from "@/services/permissions"
 import { retryTask } from "@/services/task-manager"
 import {
@@ -33,10 +32,16 @@ import {
   importWorkspace,
   newWorkspace,
 } from "@/services/workspace"
-import { saveSkill, deleteSkill } from "@/services/skills"
 import { ToolActivityRow } from "./ToolActivityRow"
-import { SkillEditorModal } from "./SkillEditorModal"
-import type { Task, WorkspaceSummary, Model, Skill } from "@/types"
+import { MessageBubble } from "@/components/chat/MessageBubble"
+import { SkillChips } from "@/components/ui/SkillChips"
+import { SlashCommandDropdown } from "@/components/ui/SlashCommandDropdown"
+import { useSlashCommand } from "@/hooks/useSlashCommand"
+import type { Task, WorkspaceSummary, Model, Message } from "@/types"
+
+// Stable empty array — prevents React 19 getSnapshot tearing detection from
+// triggering infinite re-renders when the MAJORDOMO_WS_ID key is absent.
+const EMPTY_MESSAGES: Message[] = []
 
 const TASK_STATUS_COLOR: Record<string, string> = {
   pending: "var(--color-t2)",
@@ -70,7 +75,9 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
   } = useMajordomoStore()
 
   // Read Majordomo messages from useChatStore (Phase 3.2)
-  const messages = useChatStore((state) => state.messages[MAJORDOMO_WS_ID] ?? [])
+  const messages = useChatStore(
+    (state) => state.messages[MAJORDOMO_WS_ID] ?? EMPTY_MESSAGES
+  )
   const {
     workspaces,
     activeWorkspaceId,
@@ -79,12 +86,13 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
     removeWorkspace,
   } = useWorkspaceStore()
   const { providers } = useProviderStore()
-  const { skills, activeSkillId, setActiveSkill, addSkill, updateSkill, removeSkill } =
-    useSkillsStore()
+  const { skills } = useSkillsStore()
   const { majordomoWidth } = useLayoutStore()
   const allTasks = useTaskStore((state) => state.tasks)
 
   const [input, setInput] = useState("")
+  // Per-message skills selected via slash command — NOT stored globally
+  const [ephemeralSkills, setEphemeralSkills] = useState<(typeof skills)[number][]>([])
   const [confirmClear, setConfirmClear] = useState(false)
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<Set<string> | null>(null)
   const [confirmTarget, setConfirmTarget] = useState<{ id: string; name: string } | null>(
@@ -201,6 +209,7 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
         if (next) setActiveWorkspace(next.id)
       }
       removeWorkspace(id)
+      eventBus.emit("workspace:deleted", { workspaceId: id })
     } catch (err) {
       console.error("Failed to delete workspace:", err)
     }
@@ -208,14 +217,36 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
 
   async function handleSend() {
     const content = input.trim()
-    if (!content || isStreaming) return
+    if ((!content && ephemeralSkills.length === 0) || isStreaming) return
     setInput("")
-
-    const activeSkill = skills.find((s) => s.id === activeSkillId)
-    await majordomoAgent.send(content, workspaces, summaries, activeSkill)
+    const ids = ephemeralSkills.map((s) => s.id)
+    setEphemeralSkills([])
+    await majordomoAgent.send(content, workspaces, summaries, ids)
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (slashState.query !== null && slashState.matches.length > 0) {
+      if (e.key === "Enter" || e.key === "Tab") {
+        const skill = slashState.matches[slashState.selectedIndex]
+        if (skill) {
+          e.preventDefault()
+          selectSkill(skill, () => {
+            setEphemeralSkills((prev) =>
+              prev.some((s) => s.id === skill.id) ? prev : [...prev, skill]
+            )
+          })
+          setInput("")
+          return
+        }
+      }
+      if (slashKeyDown(e)) return
+    }
+    // Backspace on empty input removes the last ephemeral skill chip
+    if (e.key === "Backspace" && input === "" && ephemeralSkills.length > 0) {
+      e.preventDefault()
+      setEphemeralSkills((prev) => prev.slice(0, -1))
+      return
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -270,49 +301,101 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
   const activeModel = activeProvider?.models?.find((m: Model) => m.id === selectedModelId)
   const modelLabel = activeModel?.name ?? selectedModelId ?? "No model"
 
+  const modelWrapRef = useRef<HTMLDivElement>(null)
+  const mjInputRef = useRef<HTMLTextAreaElement>(null)
   const [modelOpen, setModelOpen] = useState(false)
-  const [skillOpen, setSkillOpen] = useState(false)
-  const [skillEditorOpen, setSkillEditorOpen] = useState(false)
-  const [editingSkill, setEditingSkill] = useState<Skill | null>(null)
+  const [modelDropdownPos, setModelDropdownPos] = useState<{
+    top: number
+    left: number
+  } | null>(null)
 
-  function openNewSkill() {
-    setEditingSkill(null)
-    setSkillOpen(false)
-    setSkillEditorOpen(true)
-  }
-
-  function openEditSkill(skill: Skill) {
-    setEditingSkill(skill)
-    setSkillOpen(false)
-    setSkillEditorOpen(true)
-  }
-
-  async function handleSkillSave(skill: Skill) {
-    await saveSkill(skill)
-    if (editingSkill) {
-      updateSkill(skill)
-    } else {
-      addSkill(skill)
-    }
-    setSkillEditorOpen(false)
-  }
-
-  async function handleSkillDelete(id: string) {
-    await deleteSkill(id)
-    removeSkill(id)
-  }
-
-  const activeSkill = skills.find((s) => s.id === activeSkillId)
-  const skillLabel = activeSkill?.name ?? "Default"
+  const {
+    state: slashState,
+    onInputChange,
+    handleKeyDown: slashKeyDown,
+    selectSkill,
+  } = useSlashCommand(skills)
 
   return (
     <div ref={panelRef} className="mj-panel" style={{ width: majordomoWidth }}>
-      {/* Header — two rows */}
+      {/* Header — single row: icon + title + model chip + clear */}
       <div className="mj-head">
-        {/* Row 1: icon + title + global */}
         <div className="mj-head-row">
           <div className="mj-icon">✦</div>
           <span className="mj-title">Majordomo</span>
+
+          {/* Model selector — inline chip, dropdown uses position:fixed to escape overflow:hidden */}
+          <div className="mj-model-wrap" ref={modelWrapRef}>
+            <button
+              className="mj-model-chip"
+              onClick={() => {
+                if (modelOpen) {
+                  setModelOpen(false)
+                  return
+                }
+                const rect = modelWrapRef.current?.getBoundingClientRect()
+                if (rect) setModelDropdownPos({ top: rect.bottom + 4, left: rect.left })
+                setModelOpen(true)
+              }}
+              title={modelLabel}
+            >
+              <span className="mj-model-name">{modelLabel}</span>
+              <ChevronDown size={9} style={{ flexShrink: 0 }} />
+            </button>
+            {modelOpen && modelDropdownPos && (
+              <>
+                <div
+                  style={{ position: "fixed", inset: 0, zIndex: 9 }}
+                  onClick={() => setModelOpen(false)}
+                />
+                <div
+                  className="model-dropdown"
+                  style={{
+                    position: "fixed",
+                    top: modelDropdownPos.top,
+                    left: modelDropdownPos.left,
+                    right: "auto",
+                  }}
+                  role="listbox"
+                >
+                  {providers.map((provider) => (
+                    <div key={provider.id}>
+                      <div className="model-group-label">{provider.name}</div>
+                      {(provider.models ?? []).map((model: Model) => (
+                        <button
+                          key={model.id}
+                          role="option"
+                          aria-selected={
+                            provider.id === selectedProviderId &&
+                            model.id === selectedModelId
+                          }
+                          className={`model-option ${
+                            provider.id === selectedProviderId &&
+                            model.id === selectedModelId
+                              ? "on"
+                              : ""
+                          }`}
+                          onClick={() => {
+                            setModel(provider.id, model.id)
+                            setModelOpen(false)
+                          }}
+                        >
+                          {model.name}
+                        </button>
+                      ))}
+                      {(provider.models ?? []).length === 0 && (
+                        <div className="model-option-empty">No models loaded</div>
+                      )}
+                    </div>
+                  ))}
+                  {providers.length === 0 && (
+                    <div className="model-option-empty">No providers configured</div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
           <button
             className="mj-clear-btn"
             onClick={() => setConfirmClear(true)}
@@ -322,155 +405,7 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
             <Eraser size={10} />
           </button>
         </div>
-        {/* Row 2: model selector + skill selector */}
-        <div className="mj-head-row" style={{ position: "relative", gap: 6 }}>
-          {/* Model selector */}
-          <button
-            className="mj-model-chip"
-            onClick={() => setModelOpen((v) => !v)}
-            title={modelLabel}
-          >
-            <span className="mj-model-name">{modelLabel}</span>
-            <ChevronDown size={9} style={{ flexShrink: 0 }} />
-          </button>
-          {modelOpen && (
-            <>
-              <div
-                style={{ position: "fixed", inset: 0, zIndex: 9 }}
-                onClick={() => setModelOpen(false)}
-              />
-              <div
-                className="model-dropdown"
-                style={{ left: 0, right: "auto" }}
-                role="listbox"
-              >
-                {providers.map((provider) => (
-                  <div key={provider.id}>
-                    <div className="model-group-label">{provider.name}</div>
-                    {(provider.models ?? []).map((model: Model) => (
-                      <button
-                        key={model.id}
-                        role="option"
-                        aria-selected={
-                          provider.id === selectedProviderId &&
-                          model.id === selectedModelId
-                        }
-                        className={`model-option ${
-                          provider.id === selectedProviderId &&
-                          model.id === selectedModelId
-                            ? "on"
-                            : ""
-                        }`}
-                        onClick={() => {
-                          setModel(provider.id, model.id)
-                          setModelOpen(false)
-                        }}
-                      >
-                        {model.name}
-                      </button>
-                    ))}
-                    {(provider.models ?? []).length === 0 && (
-                      <div className="model-option-empty">No models loaded</div>
-                    )}
-                  </div>
-                ))}
-                {providers.length === 0 && (
-                  <div className="model-option-empty">No providers configured</div>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* Skill selector — always visible */}
-          <>
-            <button
-              className="mj-model-chip"
-              onClick={() => setSkillOpen((v) => !v)}
-              title={skillLabel}
-              style={{ maxWidth: 110 }}
-            >
-              <span className="mj-model-name">{skillLabel}</span>
-              <ChevronDown size={9} style={{ flexShrink: 0 }} />
-            </button>
-            {skillOpen && (
-              <>
-                <div
-                  style={{ position: "fixed", inset: 0, zIndex: 9 }}
-                  onClick={() => setSkillOpen(false)}
-                />
-                <div
-                  className="model-dropdown skill-dropdown"
-                  style={{ left: 0, right: "auto" }}
-                  role="listbox"
-                >
-                  <button
-                    role="option"
-                    aria-selected={activeSkillId === null}
-                    className={`model-option ${activeSkillId === null ? "on" : ""}`}
-                    onClick={() => {
-                      setActiveSkill(null)
-                      setSkillOpen(false)
-                    }}
-                  >
-                    Default
-                  </button>
-                  {skills.map((skill) => (
-                    <div key={skill.id} className="skill-option-row">
-                      <button
-                        role="option"
-                        aria-selected={skill.id === activeSkillId}
-                        className={`model-option skill-option-btn ${skill.id === activeSkillId ? "on" : ""}`}
-                        onClick={() => {
-                          setActiveSkill(skill.id)
-                          setSkillOpen(false)
-                        }}
-                      >
-                        {skill.name}
-                      </button>
-                      <div className="skill-option-acts">
-                        <button
-                          className="skill-act-btn"
-                          title="Edit skill"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            openEditSkill(skill)
-                          }}
-                        >
-                          <Pencil size={10} />
-                        </button>
-                        <button
-                          className="skill-act-btn skill-act-del"
-                          title="Delete skill"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleSkillDelete(skill.id)
-                          }}
-                        >
-                          <Trash2 size={10} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="skill-dropdown-footer">
-                    <button className="skill-new-btn" onClick={openNewSkill}>
-                      <Plus size={10} />
-                      New skill
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-          </>
-        </div>
       </div>
-
-      {/* Skill editor modal */}
-      <SkillEditorModal
-        open={skillEditorOpen}
-        skill={editingSkill}
-        onSave={handleSkillSave}
-        onClose={() => setSkillEditorOpen(false)}
-      />
 
       {/* Workspace list */}
       <div className="mj-ws-section">
@@ -605,7 +540,8 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
             Ask me anything across all your workspaces.
           </div>
         )}
-        {messages.map((msg) => {
+        {messages.map((msg, idx) => {
+          const isLastMsg = idx === messages.length - 1
           // Workspace result card (system message with isResultCard metadata)
           if (msg.role === "system" && msg.metadata?.isResultCard) {
             const wsId = msg.metadata.workspaceId as string | undefined
@@ -641,25 +577,12 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
           }
 
           return (
-            <div key={msg.id} className={`mj-msg ${msg.role === "user" ? "user" : "ai"}`}>
-              <div className="mj-msg-lbl">
-                {msg.role === "user" ? "You" : "Majordomo"}
-              </div>
-              <div className="mj-msg-body">
-                {msg.role === "assistant" ? (
-                  <div className="msg-markdown">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm, remarkBreaks]}
-                      rehypePlugins={[rehypeHighlight]}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  <>{msg.content}</>
-                )}
-              </div>
-            </div>
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              variant="mj"
+              isStreaming={isStreaming && isLastMsg && msg.role === "assistant"}
+            />
           )
         })}
         <div ref={msgsEndRef} />
@@ -740,16 +663,50 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
       {/* Input */}
       <div className="mj-foot">
         <div className="mj-input-box">
+          {slashState.query !== null && slashState.matches.length > 0 && (
+            <SlashCommandDropdown
+              skills={slashState.matches}
+              selectedIndex={slashState.selectedIndex}
+              onSelect={(skill) => {
+                selectSkill(skill, () => {
+                  setEphemeralSkills((prev) =>
+                    prev.some((s) => s.id === skill.id) ? prev : [...prev, skill]
+                  )
+                })
+                setInput("")
+                mjInputRef.current?.focus()
+              }}
+              anchorRef={mjInputRef}
+            />
+          )}
+          {ephemeralSkills.length > 0 && (
+            <div className="input-chips">
+              <SkillChips
+                skills={ephemeralSkills}
+                onRemove={(id) =>
+                  setEphemeralSkills((prev) => prev.filter((s) => s.id !== id))
+                }
+                variant="mj"
+              />
+            </div>
+          )}
           <textarea
+            ref={mjInputRef}
             className="mj-ta"
-            placeholder="Ask anything, across all workspaces…"
+            placeholder={
+              ephemeralSkills.length > 0
+                ? "Add a message…"
+                : "Ask anything, across all workspaces…"
+            }
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value)
+              onInputChange(e.target.value)
+            }}
             onKeyDown={onKeyDown}
             disabled={isStreaming}
           />
           <div className="mj-bar-row">
-            <span className="mj-hint">always available</span>
             <button className="mj-send" onClick={handleSend} disabled={isStreaming}>
               <SendHorizontal size={11} />
               Ask

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react"
-import { Settings, Files, GitBranch, Bot, Sun, Moon } from "lucide-react"
+import { Settings, Files, GitBranch, Bot, Sun, Moon, Sparkles } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
@@ -8,24 +8,29 @@ import { useSkillsStore } from "@/stores/skills"
 import { useMajordomoStore, initMajordomoResultListener } from "@/stores/majordomo"
 import { useChatStore } from "@/stores/chat"
 import { useLayoutStore } from "@/stores/layout"
+import { useTaskStore } from "@/stores/tasks"
 import { useColumnResize } from "@/hooks/useColumnResize"
 import { initAppDirs } from "@/services/providers/storage"
 import { listWorkspaces, createWorkspace, newWorkspace } from "@/services/workspace"
 import { listProviders } from "@/services/providers/storage"
 import { listSkills } from "@/services/skills"
+import { discoverGlobalSkills, loadFullSkill } from "@/services/skills/skill-discovery"
 import { registerBuiltins } from "@/services/tools/builtins"
 import { loadMajordomoMessages, MAJORDOMO_WS_ID } from "@/services/conversation"
 import { agentPool } from "@/services/agent-pool"
+import { eventBus } from "@/services/event-bus"
 import { MajordomoPanel } from "@/components/majordomo/MajordomoPanel"
 import { ChatPanel } from "@/components/chat/ChatPanel"
 import { PreviewPanel } from "@/components/preview/PreviewPanel"
 import { WorkspacePanel } from "@/components/workspace/WorkspacePanel"
+import { WorkspaceSkillCatalog } from "@/components/workspace/WorkspaceSkillCatalog"
+import { MajordomoSkillCatalog } from "@/components/workspace/MajordomoSkillCatalog"
 import { FlexibleWorkspace, type Pane } from "@/components/workspace/FlexibleWorkspace"
 import { AgentsPanel } from "@/components/agents/AgentsPanel"
 import { ProviderSettings } from "@/components/provider/ProviderSettings"
 import { CommandPalette } from "@/components/majordomo/CommandPalette"
 import { LayoutToggle } from "@/components/ui/LayoutToggle"
-import type { RenderableContent } from "@/types"
+import type { RenderableContent, Skill } from "@/types"
 
 export default function App() {
   const { theme, toggleTheme, openSettings, openCommandPalette } = useUIStore()
@@ -37,7 +42,7 @@ export default function App() {
     addWorkspace,
   } = useWorkspaceStore()
   const { setProviders } = useProviderStore()
-  const { setSkills } = useSkillsStore()
+  const { setSkills, workspaceActiveSkillIds } = useSkillsStore()
   // useMajordomoStore still needed for initMajordomoResultListener (called in bootstrap)
   useMajordomoStore()
   const setMajordomoMessages = useChatStore((state) => state.setMessages)
@@ -70,8 +75,8 @@ export default function App() {
     invertDelta: true,
   })
 
-  // Right panel tab state: "files" | "git"
-  const [rightPanelTab, setRightPanelTab] = useState<"files" | "git">("files")
+  // Right panel tab state: "files" | "skills" | "git"
+  const [rightPanelTab, setRightPanelTab] = useState<"files" | "skills" | "git">("files")
 
   // Flexible workspace panes
   const [workspacePanes, setWorkspacePanes] = useState<Pane[]>([])
@@ -91,6 +96,16 @@ export default function App() {
     // Wire up Majordomo ← workspace result notifications
     const unsubscribeResults = initMajordomoResultListener()
 
+    // Clean up all stores when a workspace is deleted
+    const unsubscribeDelete = eventBus.on("workspace:deleted", ({ workspaceId }) => {
+      useChatStore.getState().deleteWorkspaceData(workspaceId)
+      useLayoutStore.getState().deleteWorkspaceLayout(workspaceId)
+      useSkillsStore.getState().deleteWorkspaceData(workspaceId)
+      useTaskStore.getState().deleteWorkspaceTasks(workspaceId)
+      useMajordomoStore.getState().deleteWorkspaceSummary(workspaceId)
+      agentPool.remove(workspaceId)
+    })
+
     async function bootstrap() {
       try {
         await initAppDirs()
@@ -104,9 +119,22 @@ export default function App() {
           listSkills().catch(() => []),
           loadMajordomoMessages().catch(() => []),
         ])
+
+        // Also discover SKILL.md-format skills from ~/.mindeck/skills/ and ~/.claude/skills/
+        const globalIndices = await discoverGlobalSkills().catch(() => [])
+        const skillsMd = (
+          await Promise.all(
+            globalIndices
+              .filter((idx) => idx.source.type === "skill-md")
+              .map((idx) => loadFullSkill(idx).catch(() => null))
+          )
+        ).filter((s): s is Skill => s !== null)
+        const existingIds = new Set(skillsList.map((s) => s.id))
+        const newMdSkills = skillsMd.filter((s) => !existingIds.has(s.id))
+
         setWorkspaces(wsList)
         setProviders(provList)
-        setSkills(skillsList)
+        setSkills([...skillsList, ...newMdSkills])
         setMajordomoMessages(MAJORDOMO_WS_ID, majordomoMsgs)
 
         // Connect pool agents for all workspaces so dispatches work
@@ -131,6 +159,7 @@ export default function App() {
 
     return () => {
       unsubscribeResults()
+      unsubscribeDelete()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -308,7 +337,7 @@ export default function App() {
               className="right-panel"
               style={{ width: rightPanelWidth }}
             >
-              {/* Top: File tabs (Files, Git, etc.) - 70% */}
+              {/* Top: File tabs (Files, Skills, Git) - 70% */}
               <div className="right-panel-top">
                 <div className="right-panel-tabs">
                   <button
@@ -317,6 +346,19 @@ export default function App() {
                   >
                     <Files size={12} />
                     <span>Files</span>
+                  </button>
+                  <button
+                    className={`right-panel-tab ${rightPanelTab === "skills" ? "on" : ""}`}
+                    onClick={() => setRightPanelTab("skills")}
+                  >
+                    <Sparkles size={12} />
+                    <span>Skills</span>
+                    {activeWorkspace &&
+                      (workspaceActiveSkillIds[activeWorkspace.id]?.length ?? 0) > 0 && (
+                        <span className="right-panel-tab-badge">
+                          {workspaceActiveSkillIds[activeWorkspace.id].length}
+                        </span>
+                      )}
                   </button>
                   <button
                     className={`right-panel-tab ${rightPanelTab === "git" ? "on" : ""}`}
@@ -329,6 +371,17 @@ export default function App() {
                 <div className="right-panel-content">
                   {rightPanelTab === "files" && (
                     <WorkspacePanel workspace={activeWorkspace} />
+                  )}
+                  {rightPanelTab === "skills" && (
+                    <div className="skills-tab-split">
+                      <div className="skills-tab-top">
+                        <MajordomoSkillCatalog />
+                      </div>
+                      <div className="skills-tab-divider" />
+                      <div className="skills-tab-bottom">
+                        <WorkspaceSkillCatalog workspaceId={activeWorkspace.id} />
+                      </div>
+                    </div>
                   )}
                   {rightPanelTab === "git" && (
                     <div className="right-panel-placeholder">

@@ -33,6 +33,7 @@ interface LayoutState {
   setShowCenter: (v: boolean) => void
   setShowRight: (v: boolean) => void
   setWorkspaceLayout: (workspaceId: string, layout: SerializedWorkspaceLayout) => void
+  deleteWorkspaceLayout: (workspaceId: string) => void
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -54,6 +55,11 @@ export const useLayoutStore = create<LayoutState>()(
         set((state) => ({
           workspaceLayouts: { ...state.workspaceLayouts, [workspaceId]: layout },
         })),
+      deleteWorkspaceLayout: (workspaceId) =>
+        set((state) => {
+          const { [workspaceId]: _, ...workspaceLayouts } = state.workspaceLayouts
+          return { workspaceLayouts }
+        }),
     }),
     {
       name: "mindeck-layout",

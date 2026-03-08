@@ -10,6 +10,8 @@ import { ToolResultBubble } from "./ToolResultBubble"
 interface MessageBubbleProps {
   message: Message
   isStreaming?: boolean
+  /** "ws" = workspace chat (emerald accent), "mj" = Majordomo panel (violet accent) */
+  variant?: "ws" | "mj"
 }
 
 interface ParsedContent {
@@ -22,7 +24,7 @@ interface ParsedContent {
  * When `isStreaming` is true, also handles unclosed tags by treating
  * everything after the opening tag as an in-progress thinking block.
  */
-function parseThinkingBlocks(content: string, isStreaming = false): ParsedContent {
+export function parseThinkingBlocks(content: string, isStreaming = false): ParsedContent {
   const thinkingBlocks: string[] = []
   let cleaned = content
     .replace(/<thinking>([\s\S]*?)<\/thinking>/gi, (_, inner: string) => {
@@ -46,18 +48,17 @@ function parseThinkingBlocks(content: string, isStreaming = false): ParsedConten
   return { thinkingBlocks, mainContent: cleaned.trim() }
 }
 
-function getSenderLabel(message: Message): string {
+function getSenderLabel(message: Message, variant: "ws" | "mj"): string {
   if (message.role === "user") {
     if (message.metadata?.source === "majordomo") return "Majordomo"
     return "You"
   }
-  if (message.metadata?.agentId) {
-    return message.metadata.agentId as string
-  }
+  if (variant === "mj") return "Majordomo"
+  if (message.metadata?.agentId) return message.metadata.agentId as string
   return message.model ?? "Agent"
 }
 
-function ThinkingBlock({ content }: { content: string }) {
+export function ThinkingBlock({ content }: { content: string }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="thinking-block">
@@ -81,17 +82,22 @@ function ThinkingBlock({ content }: { content: string }) {
   )
 }
 
-export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
+export function MessageBubble({ message, isStreaming, variant = "ws" }: MessageBubbleProps) {
   // Tool result messages get their own compact collapsible UI
   if (message.role === "tool") {
     return <ToolResultBubble message={message} />
   }
 
   const isUser = message.role === "user"
-  const isFromMajordomo = isUser && message.metadata?.source === "majordomo"
-  const isSubAgent = message.role === "assistant" && !!message.metadata?.agentId
+  // These decorations are workspace-only (dispatch dividers, sub-agent tags)
+  const isFromMajordomo = variant === "ws" && isUser && message.metadata?.source === "majordomo"
+  const isSubAgent = variant === "ws" && message.role === "assistant" && !!message.metadata?.agentId
 
-  const senderLabel = getSenderLabel(message)
+  const senderLabel = getSenderLabel(message, variant)
+
+  const prefix = variant === "mj" ? "mj-msg" : "msg"
+  const lblClass = variant === "mj" ? "mj-msg-lbl" : "msg-lbl"
+  const bodyClass = variant === "mj" ? "mj-msg-body" : "msg-body"
 
   const { thinkingBlocks, mainContent } = isUser
     ? { thinkingBlocks: [], mainContent: message.content }
@@ -99,9 +105,9 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
 
   return (
     <div
-      className={`msg ${isUser ? "user" : "ai"}${isFromMajordomo ? " msg-from-mj" : ""}${isSubAgent ? " msg-sub-agent" : ""}`}
+      className={`${prefix} ${isUser ? "user" : "ai"}${isFromMajordomo ? " msg-from-mj" : ""}${isSubAgent ? " msg-sub-agent" : ""}`}
     >
-      <div className="msg-lbl">
+      <div className={lblClass}>
         <span style={isFromMajordomo ? { color: "var(--color-mj)" } : undefined}>
           {senderLabel}
         </span>
@@ -109,7 +115,7 @@ export function MessageBubble({ message, isStreaming }: MessageBubbleProps) {
           <AgentTag label={message.metadata?.agentId as string} color="var(--color-ac)" />
         )}
       </div>
-      <div className="msg-body">
+      <div className={bodyClass}>
         {isUser ? (
           <>
             {message.content}

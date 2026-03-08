@@ -15,11 +15,10 @@ export function WorkspacePanel({ workspace }: WorkspacePanelProps) {
 
   return (
     <div className="ws-panel">
-      {contentRoot ? (
-        <FileExplorer key={contentRoot} contentRoot={contentRoot} />
-      ) : (
-        <div className="fe-status">Resolving path…</div>
-      )}
+      {contentRoot
+        ? <FileExplorer key={contentRoot} contentRoot={contentRoot} />
+        : <div className="fe-status">Resolving path…</div>
+      }
     </div>
   )
 }
@@ -29,9 +28,6 @@ export function WorkspacePanel({ workspace }: WorkspacePanelProps) {
  *
  * - linked workspace: the imported folder path (repoPath)
  * - internal workspace: ~/.mindeck/workspaces/<id>/files/
- *
- * This is what the Files panel shows — NOT the workspace storage directory
- * (conversations/, knowledge/, etc. are hidden from the user).
  */
 export async function resolveContentRoot(workspace: Workspace): Promise<string> {
   if (workspace.workspaceType === "linked" && workspace.repoPath) {
@@ -42,7 +38,6 @@ export async function resolveContentRoot(workspace: Workspace): Promise<string> 
     const home = await homeDir()
     return `${home}/.mindeck/workspaces/${workspace.id}/files`
   } catch {
-    // Browser/dev mode fallback
     return `~/.mindeck/workspaces/${workspace.id}/files`
   }
 }

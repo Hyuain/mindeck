@@ -1,6 +1,7 @@
 import { useState } from "react"
-import { Bot } from "lucide-react"
+import { Bot, Cpu } from "lucide-react"
 import { useWorkspaceStore } from "@/stores/workspace"
+import { useAgentsStore } from "@/stores/agents"
 import { useDragState } from "@/services/dragState"
 
 interface AgentNode {
@@ -11,6 +12,7 @@ interface AgentNode {
 
 export function AgentsPanel() {
   const { workspaces, activeWorkspaceId } = useWorkspaceStore()
+  const { subAgents } = useAgentsStore()
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [draggingAgentId, setDraggingAgentId] = useState<string | null>(null)
 
@@ -118,19 +120,44 @@ export function AgentsPanel() {
           {agents.map((agent) => {
             const isSelected = selectedAgentId === agent.id
             const isDragging = draggingAgentId === agent.id
+            const children = subAgents[agent.workspaceId] ?? []
 
             return (
-              <div
-                key={agent.id}
-                className={`agent-tree-item ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
-                onClick={() => setSelectedAgentId(agent.id)}
-                onPointerDown={(e) => handlePointerDown(e, agent)}
-                style={{ userSelect: "none", cursor: "grab" }}
-              >
-                <div className="agent-tree-icon">
-                  <Bot size={12} />
+              <div key={agent.id} className="agent-tree-node">
+                {/* Main agent row */}
+                <div
+                  className={`agent-tree-item ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
+                  onClick={() => setSelectedAgentId(agent.id)}
+                  onPointerDown={(e) => handlePointerDown(e, agent)}
+                  style={{ userSelect: "none", cursor: "grab" }}
+                >
+                  <div className="agent-tree-icon">
+                    <Bot size={12} />
+                  </div>
+                  <span className="agent-tree-label">Main agent</span>
+                  {children.length > 0 && (
+                    <span className="agent-tree-count">{children.length}</span>
+                  )}
                 </div>
-                <span className="agent-tree-label">Main agent</span>
+
+                {/* Sub-agent children */}
+                {children.length > 0 && (
+                  <div className="agent-tree-children">
+                    {children.map((sub) => (
+                      <div
+                        key={sub.name}
+                        className={`agent-tree-item sub-agent-item ${sub.status}`}
+                      >
+                        <div className="agent-tree-connector" />
+                        <div className="agent-tree-icon sub-agent">
+                          <Cpu size={10} />
+                        </div>
+                        <span className="agent-tree-label sub-agent-label">{sub.name}</span>
+                        <span className={`agent-tree-status-dot ${sub.status}`} />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )
           })}

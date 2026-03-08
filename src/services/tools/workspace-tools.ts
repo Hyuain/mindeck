@@ -6,7 +6,8 @@
 import { runAgentLoop } from "../agentic-loop"
 import { getToolDefinitions } from "./registry"
 import { createLogger } from "../logger"
-import type { AgentMessage, ToolActivity, ToolDefinition } from "@/types"
+import { useSkillsStore } from "@/stores/skills"
+import type { AgentMessage, Skill, ToolActivity, ToolDefinition } from "@/types"
 
 const log = createLogger("WorkspaceTools")
 
@@ -18,6 +19,8 @@ export interface WorkspaceToolContext {
   workspaceName: string
   onSubAgentToolStart: (activity: ToolActivity) => void
   onSubAgentToolEnd: (activity: ToolActivity) => void
+  /** Per-message skills selected via slash command — merged with always-on skills in load_skill */
+  ephemeralSkills?: Skill[]
 }
 
 export interface WorkspaceTools {
@@ -75,6 +78,22 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): WorkspaceTools 
         required: ["agents"],
       },
     },
+    {
+      name: "load_skill",
+      description:
+        "Load the full instructions for an active workspace skill into context. Call this when you need to apply a specific skill's behavior to the current task.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description:
+              "The exact name of the skill to load, as listed in the Available Skills section",
+          },
+        },
+        required: ["name"],
+      },
+    },
   ]
 
   const executors = new Map<string, (args: Record<string, unknown>) => Promise<unknown>>()
@@ -95,6 +114,26 @@ export function createWorkspaceTools(ctx: WorkspaceToolContext): WorkspaceTools 
       agents.map(({ name, task }) => runSubAgent(name, task, ctx))
     )
     return agents.map(({ name }, i) => `## ${name}\n\n${results[i]}`).join("\n\n---\n\n")
+  })
+
+  executors.set("load_skill", async (args) => {
+    const name = args.name as string
+    const alwaysOnSkills = useSkillsStore
+      .getState()
+      .getWorkspaceActiveSkills(ctx.workspaceId)
+    // Merge always-on with ephemeral (deduplicated by id), ephemeral takes precedence
+    const alwaysOnIds = new Set(alwaysOnSkills.map((s) => s.id))
+    const combined = [
+      ...alwaysOnSkills,
+      ...(ctx.ephemeralSkills ?? []).filter((s) => !alwaysOnIds.has(s.id)),
+    ]
+    const skill = combined.find((s) => s.name.toLowerCase() === name.toLowerCase())
+    if (!skill) {
+      const available = combined.map((s) => s.name).join(", ")
+      return `Skill "${name}" not found. Available skills: ${available || "none"}`
+    }
+    const instructions = skill.instructions ?? skill.systemPrompt
+    return `## Skill: ${skill.name}\n\n${instructions.trim()}`
   })
 
   return { definitions, executors }

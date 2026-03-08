@@ -3,7 +3,12 @@
  * Ephemeral — events are signals only; durable state lives in JSONL + Zustand.
  */
 
-import type { TaskDispatchEvent, TaskStatusEvent, TaskResultEvent } from "@/types"
+import type {
+  TaskDispatchEvent,
+  TaskStatusEvent,
+  TaskResultEvent,
+  WorkspaceDeletedEvent,
+} from "@/types"
 import { createLogger } from "./logger"
 
 const log = createLogger("EventBus")
@@ -12,6 +17,7 @@ type BusEventMap = {
   "task:dispatch": TaskDispatchEvent
   "task:status": TaskStatusEvent
   "task:result": TaskResultEvent
+  "workspace:deleted": WorkspaceDeletedEvent
 }
 
 type BusEventKey = keyof BusEventMap

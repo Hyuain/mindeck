@@ -19,6 +19,7 @@ interface TaskState {
 
   /** Trim completed/failed tasks beyond MAX_TASKS_PER_WORKSPACE for a given workspace */
   pruneWorkspace: (workspaceId: string) => void
+  deleteWorkspaceTasks: (workspaceId: string) => void
 }
 
 export const useTaskStore = create<TaskState>()(
@@ -71,6 +72,11 @@ export const useTaskStore = create<TaskState>()(
           const sorted = [...wsTasks].sort((a, b) => b.createdAt - a.createdAt)
           return { tasks: [...otherTasks, ...sorted.slice(0, MAX_TASKS_PER_WORKSPACE)] }
         }),
+
+      deleteWorkspaceTasks: (workspaceId) =>
+        set((state) => ({
+          tasks: state.tasks.filter((t) => t.workspaceId !== workspaceId),
+        })),
     }),
     {
       name: "mindeck-tasks",

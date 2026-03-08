@@ -47,6 +47,7 @@ pub fn run() {
             // skills
             commands::skills::list_skills,
             commands::skills::save_skill,
+            commands::skills::save_skill_md,
             commands::skills::delete_skill,
             // events
             commands::events::append_event,

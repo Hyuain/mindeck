@@ -15,6 +15,7 @@ interface ChatState {
   updateLastMessage: (workspaceId: string, patch: Partial<Message>) => void
   setStreaming: (workspaceId: string, streaming: boolean) => void
   clearMessages: (workspaceId: string) => void
+  deleteWorkspaceData: (workspaceId: string) => void
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -70,4 +71,11 @@ export const useChatStore = create<ChatState>((set) => ({
     set((state) => ({
       messages: { ...state.messages, [workspaceId]: [] },
     })),
+
+  deleteWorkspaceData: (workspaceId) =>
+    set((state) => {
+      const { [workspaceId]: _m, ...messages } = state.messages
+      const { [workspaceId]: _s, ...streaming } = state.streaming
+      return { messages, streaming }
+    }),
 }))

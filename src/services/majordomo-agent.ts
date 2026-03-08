@@ -17,13 +17,14 @@ import { useChatStore } from "@/stores/chat"
 import { useMajordomoStore } from "@/stores/majordomo"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useProviderStore } from "@/stores/provider"
+import { useSkillsStore } from "@/stores/skills"
 import type {
   ModelCapabilities,
   ToolActivity,
   TaskResultEvent,
+  ToolDefinition,
   Workspace,
   WorkspaceSummary,
-  Skill,
 } from "@/types"
 
 const log = createLogger("MajordomoAgent")
@@ -37,6 +38,8 @@ const WEAK_FC_PREAMBLE = `⚠️ TOOL-CALLING NOTICE: This model has limited nat
 export interface RunTurnOpts {
   systemPrompt: string
   tools: ReturnType<typeof getToolDefinitions>
+  /** Extra tool executors (e.g. load_skill) that take priority over the global registry */
+  extraExecutors?: Map<string, (args: Record<string, unknown>) => Promise<unknown>>
   /** When true, skip fake-dispatch detection and retry logic */
   isDigest?: boolean
   /** Injected into history as an ephemeral user message — not stored/displayed */
@@ -67,6 +70,7 @@ export class MajordomoAgent {
     const {
       systemPrompt,
       tools,
+      extraExecutors,
       isDigest = false,
       extraUserContent,
       retryCount = 0,
@@ -119,6 +123,7 @@ export class MajordomoAgent {
         modelId,
         history,
         tools: effectiveTools,
+        extraExecutors,
         signal: this.abortController.signal,
         onChunk: (delta) => {
           full += delta
@@ -237,7 +242,7 @@ export class MajordomoAgent {
     content: string,
     workspaces: Workspace[],
     workspaceSummaries: WorkspaceSummary[],
-    activeSkill?: Skill
+    ephemeralSkillIds?: string[]
   ): Promise<void> {
     const mjStore = useMajordomoStore.getState()
     const providerStore = useProviderStore.getState()
@@ -249,7 +254,7 @@ export class MajordomoAgent {
     const systemPrompt = this.buildSystemPrompt(
       workspaces,
       workspaceSummaries,
-      activeSkill?.systemPrompt
+      ephemeralSkillIds
     )
 
     // Persist + add user message BEFORE building history
@@ -270,8 +275,58 @@ export class MajordomoAgent {
       return
     }
 
-    const toolNames = activeSkill?.tools
-    const tools = getToolDefinitions(toolNames)
+    const tools = getToolDefinitions()
+
+    // Resolve ephemeral skills to Skill objects for use in load_skill executor
+    const allSkills = useSkillsStore.getState().skills
+    const resolvedEphemeralSkills = (ephemeralSkillIds ?? [])
+      .map((id) => allSkills.find((s) => s.id === id))
+      .filter((s): s is (typeof allSkills)[number] => s !== undefined)
+
+    // Append the Majordomo-scoped load_skill tool if any skills are available (always-on or ephemeral)
+    const alwaysOnSkills = useSkillsStore.getState().getMajordomoActiveSkills()
+    const alwaysOnIds = new Set(alwaysOnSkills.map((s) => s.id))
+    const combinedSkillsForLoad = [
+      ...alwaysOnSkills,
+      ...resolvedEphemeralSkills.filter((s) => !alwaysOnIds.has(s.id)),
+    ]
+    if (combinedSkillsForLoad.length > 0) {
+      const loadSkillDef: ToolDefinition = {
+        name: "load_skill",
+        description:
+          "Load full instructions for an active Majordomo skill into context. Call this before applying a skill's behavior.",
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description:
+                "The exact name of the skill to load, as listed in the Available Skills section",
+            },
+          },
+          required: ["name"],
+        },
+      }
+      tools.push(loadSkillDef)
+    }
+
+    // Extra executor for load_skill (searches both always-on and ephemeral skills)
+    const extraExecutors = new Map<
+      string,
+      (args: Record<string, unknown>) => Promise<unknown>
+    >()
+    extraExecutors.set("load_skill", async (args) => {
+      const name = args.name as string
+      const skill = combinedSkillsForLoad.find(
+        (s) => s.name.toLowerCase() === name.toLowerCase()
+      )
+      if (!skill) {
+        const available = combinedSkillsForLoad.map((s) => s.name).join(", ")
+        return `Skill "${name}" not found. Available skills: ${available || "none"}`
+      }
+      const instructions = skill.instructions ?? skill.systemPrompt
+      return `## Skill: ${skill.name}\n\n${instructions.trim()}`
+    })
 
     // Resolve model capabilities once here so runTurn doesn't need to repeat the lookup.
     const modelId =
@@ -279,7 +334,7 @@ export class MajordomoAgent {
     const modelCapabilities =
       provider.models?.find((m) => m.id === modelId)?.capabilities ?? {}
 
-    await this.runTurn({ systemPrompt, tools, modelCapabilities })
+    await this.runTurn({ systemPrompt, tools, extraExecutors, modelCapabilities })
   }
 
   // ── System prompt ─────────────────────────────────────────────────────────
@@ -287,7 +342,7 @@ export class MajordomoAgent {
   buildSystemPrompt(
     workspaces: Workspace[],
     summaries: WorkspaceSummary[],
-    customPrompt?: string
+    ephemeralSkillIds?: string[]
   ): string {
     const summaryText = workspaces
       .map((ws) => {
@@ -298,7 +353,27 @@ export class MajordomoAgent {
 
     const defaultSystem = `You are Majordomo, a global cross-workspace assistant for Mindeck. You have visibility into all workspaces.\n\nCurrent workspace states:\n${summaryText}\n\nBe concise. Reference workspaces by name. Help the user orchestrate their work.\n\nCRITICAL TOOL-USE RULES — VIOLATIONS WILL BE CAUGHT AND REJECTED:\n1. To send work to a workspace, you MUST produce a tool function call for \`dispatch_to_workspace\`. Writing text about dispatching does NOT dispatch — only a real tool call does. The system audits every turn; fake dispatches are automatically detected and rejected.\n2. NEVER write "已派发", "I've dispatched", "task sent", "re-dispatching", "taskId:" or similar UNLESS a tool call was actually produced in this turn. If you describe dispatching without calling the tool, the system will force a retry.\n3. When you want to dispatch, respond ONLY with the tool call — do NOT also write confirmation text. The tool result will confirm success.\n4. If you cannot produce a tool call for any reason, say "I was unable to call the tool" — never pretend you did.\n5. NEVER reproduce system audit lines like "[audit]" or "[Tools actually called:]" in your output.`
 
-    return customPrompt ?? defaultSystem
+    const alwaysOnSkills = useSkillsStore.getState().getMajordomoActiveSkills()
+    const allSkills = useSkillsStore.getState().skills
+    const ephemeralSkills = (ephemeralSkillIds ?? [])
+      .map((id) => allSkills.find((s) => s.id === id))
+      .filter((s): s is (typeof allSkills)[number] => s !== undefined)
+    const alwaysOnIds = new Set(alwaysOnSkills.map((s) => s.id))
+    const combinedSkills = [
+      ...alwaysOnSkills,
+      ...ephemeralSkills.filter((s) => !alwaysOnIds.has(s.id)),
+    ]
+    if (combinedSkills.length > 0) {
+      const lines = combinedSkills.map(
+        (s) => `- ${s.name}${s.description ? ` — ${s.description}` : ""}`
+      )
+      return (
+        defaultSystem +
+        `\n\n## Available Skills\n\n${lines.join("\n")}\n\nUse \`load_skill\` to load a skill's full instructions before applying it.`
+      )
+    }
+
+    return defaultSystem
   }
 
   // ── Abort ─────────────────────────────────────────────────────────────────

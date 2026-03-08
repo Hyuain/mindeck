@@ -13,6 +13,7 @@ import { ModelSelector } from "@/components/provider/ModelSelector"
 import { MessageList } from "./MessageList"
 import { ChatInput } from "./ChatInput"
 import { ToolActivityRow } from "@/components/majordomo/ToolActivityRow"
+import { useAgentsStore } from "@/stores/agents"
 import type { ToolActivity, Workspace } from "@/types"
 
 interface ChatPanelProps {
@@ -67,11 +68,22 @@ export function ChatPanel({ workspace, onPreview, onClose }: ChatPanelProps) {
             ? prev.map((a) => (a.id === activity.id ? activity : a))
             : [...prev, activity]
         })
+        // Track sub-agents in global store for AgentsPanel tree
+        if (activity.name.startsWith("[") && activity.name.endsWith("]")) {
+          const name = activity.name.slice(1, -1)
+          useAgentsStore.getState().upsertSubAgent(workspace.id, name, "running")
+        }
       },
       onToolEnd: (activity) => {
         setToolActivities((prev) =>
           prev.map((a) => (a.id === activity.id ? activity : a))
         )
+        // Update sub-agent status in global store
+        if (activity.name.startsWith("[") && activity.name.endsWith("]")) {
+          const name = activity.name.slice(1, -1)
+          const status = activity.status === "error" ? "error" : "done"
+          useAgentsStore.getState().upsertSubAgent(workspace.id, name, status)
+        }
       },
       onStreamingChange: (isStreamingNow) => {
         setStreaming(workspace.id, isStreamingNow)
@@ -84,7 +96,10 @@ export function ChatPanel({ workspace, onPreview, onClose }: ChatPanelProps) {
           if (lastMsg?.role === "assistant" && lastMsg.content.length > 50 && onPreview) {
             onPreview(lastMsg.content)
           }
-          setTimeout(() => setToolActivities([]), 3000)
+          setTimeout(() => {
+            setToolActivities([])
+            useAgentsStore.getState().clearSubAgents(workspace.id)
+          }, 3000)
         }
       },
       onDispatchReceived: (task) => {
@@ -103,8 +118,8 @@ export function ChatPanel({ workspace, onPreview, onClose }: ChatPanelProps) {
   }, [workspace])
 
   const handleSend = useCallback(
-    (content: string) => {
-      agentPool.get(workspace.id)?.send(content)
+    (content: string, ephemeralSkillIds: string[]) => {
+      agentPool.get(workspace.id)?.send(content, ephemeralSkillIds)
     },
     [workspace.id]
   )
@@ -165,7 +180,11 @@ export function ChatPanel({ workspace, onPreview, onClose }: ChatPanelProps) {
             ))}
           </div>
         )}
-        <ChatInput onSend={handleSend} disabled={isStreaming} />
+        <ChatInput
+          workspaceId={workspace.id}
+          onSend={handleSend}
+          disabled={isStreaming}
+        />
       </div>
       {confirmClear && (
         <div className="mj-confirm-overlay" onClick={() => setConfirmClear(false)}>
