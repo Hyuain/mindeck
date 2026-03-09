@@ -32,6 +32,11 @@ import {
   importWorkspace,
   newWorkspace,
 } from "@/services/workspace"
+import {
+  WORKSPACE_TEMPLATES,
+  applyTemplate,
+} from "@/services/templates/workspace-templates"
+import { WorkspaceTemplateSelector } from "@/components/workspace/WorkspaceTemplateSelector"
 import { ToolActivityRow } from "./ToolActivityRow"
 import { MessageBubble } from "@/components/chat/MessageBubble"
 import { SkillChips } from "@/components/ui/SkillChips"
@@ -98,6 +103,8 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
   const [confirmTarget, setConfirmTarget] = useState<{ id: string; name: string } | null>(
     null
   )
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [selectedTemplateId, setSelectedTemplateId] = useState("blank")
   const msgsEndRef = useRef<HTMLDivElement>(null)
   const msgsContainerRef = useRef<HTMLDivElement>(null)
   const isMjNearBottomRef = useRef(true)
@@ -163,8 +170,16 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
   }
 
   async function handleNew() {
+    setSelectedTemplateId("blank")
+    setShowTemplateModal(true)
+  }
+
+  async function handleConfirmNew() {
+    setShowTemplateModal(false)
     const { providerId, modelId } = getDefaultProviderInfo()
-    const ws = newWorkspace(`Workspace ${workspaces.length + 1}`, providerId, modelId)
+    const base = newWorkspace(`Workspace ${workspaces.length + 1}`, providerId, modelId)
+    const tpl = WORKSPACE_TEMPLATES.find((t) => t.id === selectedTemplateId)
+    const ws = tpl ? applyTemplate(base, tpl) : base
     try {
       await createWorkspace(ws)
       addWorkspace(ws)
@@ -751,6 +766,33 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
               </button>
               <button className="mj-confirm-delete" onClick={confirmDelete}>
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Template picker dialog */}
+      {showTemplateModal && (
+        <div className="mj-confirm-overlay" onClick={() => setShowTemplateModal(false)}>
+          <div
+            className="mj-confirm ws-template-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mj-confirm-msg">Choose a workspace template</p>
+            <WorkspaceTemplateSelector
+              selected={selectedTemplateId}
+              onSelect={setSelectedTemplateId}
+            />
+            <div className="mj-confirm-actions">
+              <button
+                className="mj-confirm-cancel"
+                onClick={() => setShowTemplateModal(false)}
+              >
+                Cancel
+              </button>
+              <button className="mj-confirm-delete" onClick={handleConfirmNew}>
+                Create
               </button>
             </div>
           </div>

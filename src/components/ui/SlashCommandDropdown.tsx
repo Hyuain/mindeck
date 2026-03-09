@@ -14,7 +14,9 @@ export function SlashCommandDropdown({
   onSelect,
   anchorRef,
 }: SlashCommandDropdownProps) {
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(
+    null
+  )
   const listRef = useRef<HTMLDivElement>(null)
 
   // Position above the anchor element
@@ -60,7 +62,12 @@ export function SlashCommandDropdown({
             onSelect(skill)
           }}
         >
-          <span className="slash-item-name">/{skill.name}</span>
+          <span className="slash-item-name">
+            /{skill.name}
+            {skill.argumentHint && (
+              <span className="slash-item-hint"> {skill.argumentHint}</span>
+            )}
+          </span>
           {skill.description && (
             <span className="slash-item-desc">{skill.description}</span>
           )}

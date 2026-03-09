@@ -39,7 +39,10 @@ export interface RunTurnOpts {
   systemPrompt: string
   tools: ReturnType<typeof getToolDefinitions>
   /** Extra tool executors (e.g. load_skill) that take priority over the global registry */
-  extraExecutors?: Map<string, (args: Record<string, unknown>) => Promise<unknown>>
+  extraExecutors?: Map<
+    string,
+    (args: Record<string, unknown>, onChunk?: (chunk: string) => void) => Promise<unknown>
+  >
   /** When true, skip fake-dispatch detection and retry logic */
   isDigest?: boolean
   /** Injected into history as an ephemeral user message — not stored/displayed */
@@ -313,7 +316,10 @@ export class MajordomoAgent {
     // Extra executor for load_skill (searches both always-on and ephemeral skills)
     const extraExecutors = new Map<
       string,
-      (args: Record<string, unknown>) => Promise<unknown>
+      (
+        args: Record<string, unknown>,
+        onChunk?: (chunk: string) => void
+      ) => Promise<unknown>
     >()
     extraExecutors.set("load_skill", async (args) => {
       const name = args.name as string

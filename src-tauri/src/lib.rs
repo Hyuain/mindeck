@@ -47,6 +47,7 @@ pub fn run() {
             commands::files::append_log_batch,
             // shell
             commands::shell::bash_exec,
+            commands::shell::bash_exec_stream,
             // skills
             commands::skills::list_skills,
             commands::skills::save_skill,
@@ -63,6 +64,24 @@ pub fn run() {
             // memory
             commands::memory::read_workspace_memory,
             commands::memory::save_workspace_memory,
+            // audit
+            commands::audit::append_audit_event,
+            // observability
+            commands::observability::append_metric_event,
+            commands::observability::load_metric_events,
+            // sandbox
+            commands::sandbox::check_docker,
+            commands::sandbox::docker_start,
+            commands::sandbox::docker_exec,
+            commands::sandbox::docker_stop,
+            // scripts
+            commands::scripts::list_scripts,
+            commands::scripts::read_script,
+            commands::scripts::write_script,
+            commands::scripts::delete_script,
+            // apps registry
+            commands::apps::load_app_registry,
+            commands::apps::save_app_registry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

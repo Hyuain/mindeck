@@ -2,8 +2,10 @@ import { useRef, useState, type KeyboardEvent } from "react"
 import { SendHorizontal } from "lucide-react"
 import { useSkillsStore } from "@/stores/skills"
 import { useSlashCommand } from "@/hooks/useSlashCommand"
+import { suggestSkills } from "@/services/skills/auto-matcher"
 import { SlashCommandDropdown } from "@/components/ui/SlashCommandDropdown"
 import { SkillChips } from "@/components/ui/SkillChips"
+import { SkillSuggestionBar } from "./SkillSuggestionBar"
 import type { Skill } from "@/types"
 
 // Stable empty array — prevents React 19 getSnapshot tearing detection from
@@ -20,9 +22,14 @@ export function ChatInput({ workspaceId, onSend, disabled }: ChatInputProps) {
   const [value, setValue] = useState("")
   // Per-message skills selected via slash command — NOT stored globally
   const [ephemeralSkills, setEphemeralSkills] = useState<Skill[]>([])
+  // E4.4: Tracks whether the user has dismissed suggestions for this input cycle
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
 
   const skills = useSkillsStore((s) => s.workspaceSkills[workspaceId] ?? EMPTY_SKILLS)
+  const workspaceActiveSkillIds = useSkillsStore(
+    (s) => s.workspaceActiveSkillIds[workspaceId] ?? EMPTY_SKILLS
+  )
 
   const {
     state: slashState,
@@ -31,12 +38,21 @@ export function ChatInput({ workspaceId, onSend, disabled }: ChatInputProps) {
     selectSkill,
   } = useSlashCommand(skills)
 
+  // E4.4: Show suggestions when there's enough text, no active skills, and user hasn't dismissed
+  const hasActiveSkills =
+    (workspaceActiveSkillIds as unknown as string[]).length > 0 || ephemeralSkills.length > 0
+  const suggestions =
+    value.trim().length > 10 && !hasActiveSkills && !suggestionsDismissed
+      ? suggestSkills(value, skills)
+      : EMPTY_SKILLS
+
   function submit() {
     const trimmed = value.trim()
     if ((!trimmed && ephemeralSkills.length === 0) || disabled) return
     onSend(trimmed, ephemeralSkills.map((s) => s.id))
     setValue("")
     setEphemeralSkills([])
+    setSuggestionsDismissed(false)
     taRef.current?.focus()
   }
 
@@ -44,6 +60,8 @@ export function ChatInput({ workspaceId, onSend, disabled }: ChatInputProps) {
     const v = e.target.value
     setValue(v)
     onInputChange(v)
+    // Reset dismissal when the user starts typing a new message
+    if (suggestionsDismissed) setSuggestionsDismissed(false)
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -86,6 +104,15 @@ export function ChatInput({ workspaceId, onSend, disabled }: ChatInputProps) {
     taRef.current?.focus()
   }
 
+  // E4.4: Activate a suggested skill — add to ephemeral list + dismiss bar
+  function handleSuggestionActivate(skill: Skill) {
+    setEphemeralSkills((prev) =>
+      prev.some((s) => s.id === skill.id) ? prev : [...prev, skill]
+    )
+    setSuggestionsDismissed(true)
+    taRef.current?.focus()
+  }
+
   const canSend = (value.trim() !== "" || ephemeralSkills.length > 0) && !disabled
 
   return (
@@ -97,6 +124,13 @@ export function ChatInput({ workspaceId, onSend, disabled }: ChatInputProps) {
             selectedIndex={slashState.selectedIndex}
             onSelect={handleSlashSelect}
             anchorRef={taRef}
+          />
+        )}
+        {suggestions.length > 0 && (
+          <SkillSuggestionBar
+            suggestions={suggestions}
+            onActivate={handleSuggestionActivate}
+            onDismiss={() => setSuggestionsDismissed(true)}
           />
         )}
         {ephemeralSkills.length > 0 && (

@@ -10,7 +10,16 @@ import { streamChat } from "./providers/bridge"
 import { executeTool, getToolDefinitions } from "./tools/registry"
 import { createLogger } from "./logger"
 import { estimateTokens, compactHistory } from "./context-compaction"
-import type { AgentMessage, ModelRef, ToolCall, ToolActivity, ToolDefinition } from "@/types"
+import { detectInjection } from "./prompt-injection"
+import { invoke } from "@tauri-apps/api/core"
+import type {
+  AgentMessage,
+  InjectionDetection,
+  ModelRef,
+  ToolCall,
+  ToolActivity,
+  ToolDefinition,
+} from "@/types"
 
 const log = createLogger("AgenticLoop")
 
@@ -53,7 +62,10 @@ export interface AgentLoopOptions {
   onToolStart: (activity: ToolActivity) => void
   onToolEnd: (activity: ToolActivity) => void
   /** Extra tool executors that take priority over the global registry */
-  extraExecutors?: Map<string, (args: Record<string, unknown>) => Promise<unknown>>
+  extraExecutors?: Map<
+    string,
+    (args: Record<string, unknown>, onChunk?: (chunk: string) => void) => Promise<unknown>
+  >
   /** H3.4: Run a verification pass after the main loop exits naturally */
   selfVerify?: boolean
   /** H3.5: Per-tool execution timeout in ms; undefined = no timeout */
@@ -64,6 +76,12 @@ export interface AgentLoopOptions {
     executionModel?: ModelRef
     verificationModel?: ModelRef
   }
+  /** E4.3: Called when a tool emits a streaming output chunk */
+  onToolOutput?: (toolCallId: string, chunk: string) => void
+  /** E4.5: Called once after the main loop (+ verify phase) completes */
+  onLoopComplete?: (metric: import("@/types").LoopCompletionMetric) => void
+  /** E4.7: Workspace ID for audit trail events */
+  workspaceId?: string
 }
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -77,7 +95,8 @@ function truncateToolResult(result: unknown, maxChars = 8000): string {
 function makeActivity(
   call: ToolCall,
   status: ToolActivity["status"],
-  result?: unknown
+  result?: unknown,
+  injectionWarning?: InjectionDetection
 ): ToolActivity {
   const now = new Date().toISOString()
   return {
@@ -88,6 +107,7 @@ function makeActivity(
     result,
     startedAt: now,
     finishedAt: status !== "running" ? now : undefined,
+    injectionWarning,
   }
 }
 
@@ -111,7 +131,11 @@ function resolveModel(
 ): { providerId: string; providerType: string; modelId: string } {
   const routing = opts.modelRouting
   if (!routing) {
-    return { providerId: opts.providerId, providerType: opts.providerType, modelId: opts.modelId }
+    return {
+      providerId: opts.providerId,
+      providerType: opts.providerType,
+      modelId: opts.modelId,
+    }
   }
 
   let ref: ModelRef | undefined
@@ -124,7 +148,11 @@ function resolveModel(
   }
 
   if (!ref) {
-    return { providerId: opts.providerId, providerType: opts.providerType, modelId: opts.modelId }
+    return {
+      providerId: opts.providerId,
+      providerType: opts.providerType,
+      modelId: opts.modelId,
+    }
   }
   return {
     providerId: ref.providerId,
@@ -159,7 +187,11 @@ async function runLoop(ctx: LoopRunOptions): Promise<LoopRunResult> {
   let { workingHistory } = ctx
 
   for (let iteration = 0; iteration < ctx.maxIter; iteration++) {
-    const { providerId, providerType, modelId } = resolveModel(opts, iteration, ctx.verifyPhase)
+    const { providerId, providerType, modelId } = resolveModel(
+      opts,
+      iteration,
+      ctx.verifyPhase
+    )
 
     let accumText = ""
     const pendingCalls = new Map<string, { name: string; argBuffer: string }>()
@@ -265,18 +297,51 @@ async function runLoop(ctx: LoopRunOptions): Promise<LoopRunResult> {
         ctx.allToolsCalled.push(call.name)
         try {
           const extraExec = opts.extraExecutors?.get(call.name)
+          // E4.3: Build per-tool chunk callback
+          const toolOnChunk = opts.onToolOutput
+            ? (chunk: string) => opts.onToolOutput!(call.id, chunk)
+            : undefined
           const execPromise = extraExec
-            ? extraExec(call.arguments)
-            : executeTool(call.name, call.arguments)
+            ? extraExec(call.arguments, toolOnChunk)
+            : executeTool(call.name, call.arguments, toolOnChunk)
 
           // H3.5: Wrap in timeout race if configured
-          const result =
+          let result =
             opts.toolTimeoutMs !== undefined
               ? await Promise.race([execPromise, timeoutReject(opts.toolTimeoutMs)])
               : await execPromise
 
+          // E4.7: Detect prompt injection in tool result
+          const resultStr = typeof result === "string" ? result : JSON.stringify(result)
+          const detection = detectInjection(resultStr)
+          let injectionWarning: InjectionDetection | undefined
+          if (detection) {
+            injectionWarning = detection
+            log.warn(`Injection detected [${detection.severity}]`, {
+              pattern: detection.pattern,
+              snippet: detection.snippet,
+              tool: call.name,
+            })
+            // Persist audit event (fire-and-forget — never blocks the loop)
+            invoke("append_audit_event", {
+              event: {
+                type: "injection_detected",
+                severity: detection.severity,
+                pattern: detection.pattern,
+                snippet: detection.snippet,
+                toolName: call.name,
+                workspaceId: opts.workspaceId ?? null,
+                timestamp: new Date().toISOString(),
+              },
+            }).catch(() => {})
+            // Redact high-severity results before injecting into LLM history
+            if (detection.severity === "high") {
+              result = `[INJECTION DETECTED — response blocked]\n\n${resultStr.slice(0, 200)}...`
+            }
+          }
+
           log.debug("tool result", { name: call.name, ok: true })
-          opts.onToolEnd(makeActivity(call, "done", result))
+          opts.onToolEnd(makeActivity(call, "done", result, injectionWarning))
           return { call, result, ok: true as const }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err)
@@ -307,10 +372,7 @@ async function runLoop(ctx: LoopRunOptions): Promise<LoopRunResult> {
     }
 
     // H3.4: Check for doom loop (window full + too few unique signatures)
-    if (
-      doomState.recentSignatures.length === DOOM_WINDOW_SIZE &&
-      !doomState.injected
-    ) {
+    if (doomState.recentSignatures.length === DOOM_WINDOW_SIZE && !doomState.injected) {
       const unique = new Set(doomState.recentSignatures).size
       if (unique <= DOOM_UNIQUE_THRESHOLD) {
         doomState.detected = true
@@ -347,9 +409,8 @@ async function runLoop(ctx: LoopRunOptions): Promise<LoopRunResult> {
 // ─── Public API ──────────────────────────────────────────────
 
 export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopResult> {
-  const {
-    maxIterations = DEFAULT_MAX_ITERATIONS,
-  } = opts
+  const { maxIterations = DEFAULT_MAX_ITERATIONS } = opts
+  const loopStartedAt = Date.now()
 
   const tools = opts.tools ?? getToolDefinitions()
   const workingHistory: AgentMessage[] = [...opts.history]
@@ -401,6 +462,20 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     })
 
     finalText = verifyResult.text
+  }
+
+  // E4.5: Emit loop completion metric
+  if (opts.onLoopComplete && opts.workspaceId) {
+    const historyStr = JSON.stringify(mainResult.workingHistory)
+    opts.onLoopComplete({
+      timestamp: new Date().toISOString(),
+      workspaceId: opts.workspaceId,
+      toolsCalled: allToolsCalled,
+      iterations: allToolsCalled.length,
+      estimatedTokens: Math.round(historyStr.length / 4),
+      durationMs: Date.now() - loopStartedAt,
+      doomLoopDetected: doomState.detected,
+    })
   }
 
   return {

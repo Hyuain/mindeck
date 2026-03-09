@@ -5,8 +5,7 @@ export const TEST_RUNNER_APP: AgentAppManifest = {
   name: "TestRunner",
   version: "1.0.0",
   description: "Runs the project test suite after task completion and reports failures.",
-  kind: "autonomous",
-  source: { type: "native", component: "TestRunner" },
+  nativeComponent: "TestRunner",
   capabilities: { acceptsTasks: false },
   toolExposure: "isolated",
   permissions: {

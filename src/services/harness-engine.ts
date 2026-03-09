@@ -70,7 +70,9 @@ class HarnessEngine {
 
         for (const app of fileWrittenApps) {
           const matchingTriggers = app.harness!.triggers.filter(
-            (t) => t.event === "file_written" && (!t.pattern || matchGlob(t.pattern, ev.filePath))
+            (t) =>
+              t.event === "file_written" &&
+              (!t.pattern || matchGlob(t.pattern, ev.filePath))
           )
           if (matchingTriggers.length > 0) {
             this.runApp(app, context, agent, workspaceId).catch((err: unknown) =>
@@ -147,7 +149,7 @@ class HarnessEngine {
     log.debug("running harness app", { app: app.id })
 
     let result: string
-    if (app.source.type === "native") {
+    if (app.nativeComponent) {
       result = await runNativeApp(app, context.workspaceRoot)
     } else {
       // MCP apps: not yet implemented in harness — placeholder

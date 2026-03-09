@@ -13,11 +13,11 @@ export async function runNativeApp(
   app: AgentAppManifest,
   workspaceRoot: string
 ): Promise<string> {
-  if (app.source.type !== "native") {
+  if (!app.nativeComponent) {
     throw new Error(`runNativeApp called on non-native app: ${app.id}`)
   }
 
-  const component = app.source.component
+  const component = app.nativeComponent
   log.debug("running native app", { component, workspaceRoot })
 
   let command: string

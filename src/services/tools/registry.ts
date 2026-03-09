@@ -2,7 +2,7 @@ import type { TaskIntent, ToolDefinition } from "@/types"
 
 export interface ToolExecutor {
   definition: ToolDefinition
-  execute(args: Record<string, unknown>): Promise<unknown>
+  execute(args: Record<string, unknown>, onChunk?: (chunk: string) => void): Promise<unknown>
 }
 
 export const toolRegistry = new Map<string, ToolExecutor>()
@@ -22,13 +22,14 @@ export function getToolDefinitions(names?: string[]): ToolDefinition[] {
 
 export async function executeTool(
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  onChunk?: (chunk: string) => void
 ): Promise<unknown> {
   const executor = toolRegistry.get(name)
   if (!executor) {
     throw new Error(`Tool '${name}' is not registered`)
   }
-  return executor.execute(args)
+  return executor.execute(args, onChunk)
 }
 
 // ─── Dynamic Action Space (H3.8) ─────────────────────────────

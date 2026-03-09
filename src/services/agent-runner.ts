@@ -7,6 +7,7 @@
 import { runAgentLoop } from "./agentic-loop"
 import type {
   AgentMessage,
+  LoopCompletionMetric,
   Message,
   ModelCapabilities,
   ModelRef,
@@ -32,7 +33,10 @@ export interface AgentRunnerOptions {
   /** Conversation history (excludes system prompt — it will be prepended automatically) */
   history: AgentMessage[]
   tools?: ToolDefinition[]
-  extraExecutors?: Map<string, (args: Record<string, unknown>) => Promise<unknown>>
+  extraExecutors?: Map<
+    string,
+    (args: Record<string, unknown>, onChunk?: (chunk: string) => void) => Promise<unknown>
+  >
   maxIterations?: number
   signal?: AbortSignal
   onChunk: (delta: string) => void
@@ -49,6 +53,12 @@ export interface AgentRunnerOptions {
     executionModel?: ModelRef
     verificationModel?: ModelRef
   }
+  /** E4.3: Called when a tool emits a streaming output chunk */
+  onToolOutput?: (toolCallId: string, chunk: string) => void
+  /** E4.5: Called once after the loop completes */
+  onLoopComplete?: (metric: LoopCompletionMetric) => void
+  /** E4.7: Workspace ID for audit trail */
+  workspaceId?: string
 }
 
 export interface AgentRunResult {
@@ -97,6 +107,9 @@ export async function runAgent(opts: AgentRunnerOptions): Promise<AgentRunResult
     onChunk: opts.onChunk,
     onToolStart: opts.onToolStart,
     onToolEnd: opts.onToolEnd,
+    onToolOutput: opts.onToolOutput,
+    onLoopComplete: opts.onLoopComplete,
+    workspaceId: opts.workspaceId,
   })
 }
 

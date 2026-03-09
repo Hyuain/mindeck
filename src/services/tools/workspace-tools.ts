@@ -25,7 +25,10 @@ export interface WorkspaceToolContext {
 
 export interface WorkspaceTools {
   definitions: ToolDefinition[]
-  executors: Map<string, (args: Record<string, unknown>) => Promise<unknown>>
+  executors: Map<
+    string,
+    (args: Record<string, unknown>, onChunk?: (chunk: string) => void) => Promise<unknown>
+  >
 }
 
 export function createWorkspaceTools(ctx: WorkspaceToolContext): WorkspaceTools {

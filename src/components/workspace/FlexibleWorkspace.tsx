@@ -253,7 +253,11 @@ export function FlexibleWorkspace({
     (e: React.PointerEvent) => {
       if (globalDragState.isDragging && globalDragState.previewData) {
         isDraggingRef.current = true
-        setDragPreview(globalDragState.previewData)
+        const pd = globalDragState.previewData
+        setDragPreview({
+          type: (pd.type === "file" ? "file" : "agent") as PaneType,
+          title: pd.title,
+        })
         cursorPosRef.current = { x: e.clientX, y: e.clientY }
         const pos = calculateDropPosition(e.clientX, e.clientY)
         setDropPositionLocal(pos)

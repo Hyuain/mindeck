@@ -21,6 +21,12 @@ import { discoverContextRules, buildContextSection } from "./skills/context-inje
 import { mcpManager } from "./mcp/manager"
 import { harnessEngine } from "./harness-engine"
 import { readWorkspaceMemory, appendToWorkspaceMemory } from "./workspace-memory"
+import { metricsCollector } from "./observability/metrics-collector"
+import { DockerSandbox } from "./sandbox/docker-sandbox"
+import {
+  connectScriptsToWorkspace,
+  disconnectScriptsFromWorkspace,
+} from "./agent-apps/script-adapter"
 import { ESLINT_APP } from "./native-apps/eslint-app"
 import { TSC_APP } from "./native-apps/tsc-app"
 import { TEST_RUNNER_APP } from "./native-apps/test-runner-app"
@@ -75,7 +81,30 @@ const WORKSPACE_BLOCKED_TOOLS = ["dispatch_to_workspace"]
 
 const SANDBOX_READ_ONLY_BLOCKED = new Set(["bash_exec", "write_file", "delete_path"])
 
-type ToolExecutorMap = Map<string, (args: Record<string, unknown>) => Promise<unknown>>
+/**
+ * E4.6: Global registry of active Docker sandboxes keyed by workspaceId.
+ * bash_exec in builtins.ts reads this to route commands through the container.
+ */
+export const activeDockerSandboxes = new Map<
+  string,
+  import("./sandbox/docker-sandbox").DockerSandbox
+>()
+
+/** E4.6: Active sandbox for the currently executing workspace process turn. */
+let _activeSandbox: import("./sandbox/docker-sandbox").DockerSandbox | null = null
+export function getActiveSandbox() {
+  return _activeSandbox
+}
+export function setActiveSandbox(
+  s: import("./sandbox/docker-sandbox").DockerSandbox | null
+) {
+  _activeSandbox = s
+}
+
+type ToolExecutorMap = Map<
+  string,
+  (args: Record<string, unknown>, onChunk?: (chunk: string) => void) => Promise<unknown>
+>
 
 /**
  * Wrap mutation tools with a blocking error when workspace is read-only.
@@ -115,6 +144,8 @@ export class WorkspaceAgent {
   private memory = ""
   /** H3.1: Pending harness feedback messages to drain on next process() */
   private pendingHarnessFeedback: Array<{ appName: string; result: string }> = []
+  /** E4.6: Active Docker sandbox (Layer 2), null = Layer 1 only */
+  private dockerSandbox: DockerSandbox | null = null
 
   constructor(
     private workspace: Workspace,
@@ -210,6 +241,23 @@ export class WorkspaceAgent {
         .catch((err: unknown) => this.log.warn("MCP dependency connection failed", err))
     }
 
+    // Connect activated app instances (non-blocking; best-effort)
+    const activatedApps = this.workspace.activatedApps ?? []
+    if (activatedApps.length > 0) {
+      const installedApps = useAgentAppsStore.getState().installedApps
+      for (const inst of activatedApps) {
+        const manifest = installedApps.find((a) => a.id === inst.appId)
+        if (manifest && manifest.mcpDependencies && manifest.mcpDependencies.length > 0) {
+          mcpManager.connectAppInstance(inst.instanceId, manifest).catch((err: unknown) =>
+            this.log.warn("App instance MCP connection failed", {
+              instanceId: inst.instanceId,
+              err,
+            })
+          )
+        }
+      }
+    }
+
     // H3.2: Connect MCPs for skills with boundAppId (non-blocking)
     this.connectBoundSkillApps().catch((err: unknown) =>
       this.log.warn("Bound skill app connection failed", err)
@@ -217,6 +265,33 @@ export class WorkspaceAgent {
 
     // H3.1: Start harness engine with native apps + workspace apps
     this.startHarness()
+
+    // E4.8: Connect user-written scripts (non-blocking; best-effort)
+    connectScriptsToWorkspace(this.workspaceId).catch((err: unknown) =>
+      this.log.warn("Script adapter connection failed", err)
+    )
+
+    // E4.6: Start Docker sandbox if configured and available
+    const containerConfig = this.workspace.containerSandbox
+    if (containerConfig?.enabled) {
+      DockerSandbox.isAvailable()
+        .then(async (available) => {
+          if (!available) {
+            this.log.warn("Docker not available — container sandbox disabled")
+            return
+          }
+          const sandbox = new DockerSandbox(containerConfig)
+          const contentRoot = await resolveContentRoot(this.workspace).catch(
+            () => `~/.mindeck/workspaces/${this.workspaceId}/files`
+          )
+          await sandbox.start(contentRoot)
+          this.dockerSandbox = sandbox
+          // Register with global registry so bash_exec can pick it up
+          activeDockerSandboxes.set(this.workspaceId, sandbox)
+          this.log.info("Docker sandbox started")
+        })
+        .catch((err: unknown) => this.log.warn("Docker sandbox startup failed", err))
+    }
   }
 
   /** Stop listening for dispatches */
@@ -227,6 +302,14 @@ export class WorkspaceAgent {
     this.abortController = new AbortController()
     harnessEngine.stop(this.workspaceId)
     mcpManager.disconnectWorkspace(this.workspaceId).catch(() => {})
+    // E4.8: Disconnect user scripts
+    disconnectScriptsFromWorkspace(this.workspaceId)
+    // E4.6: Stop Docker sandbox if running
+    if (this.dockerSandbox) {
+      activeDockerSandboxes.delete(this.workspaceId)
+      this.dockerSandbox.stop().catch(() => {})
+      this.dockerSandbox = null
+    }
   }
 
   /** Accept user input (called by ChatPanel on send) */
@@ -370,6 +453,8 @@ export class WorkspaceAgent {
       if (source.dispatchId) {
         updateTaskStatus(source.dispatchId, "processing")
       }
+      // E4.6: Expose this workspace's sandbox to bash_exec during this process turn
+      setActiveSandbox(this.dockerSandbox)
       this.log.debug("process start", {
         providerId,
         modelId,
@@ -404,9 +489,25 @@ export class WorkspaceAgent {
         ]
 
         // Merge MCP tools into definitions and executors
+        // Legacy: workspace mcpDependencies (old model)
         const mcpTools = mcpManager.getToolsForWorkspace(this.workspaceId)
         const mcpExecutors = mcpManager.getExecutorsForWorkspace(this.workspaceId)
-        const mergedDefs = [...toolDefs, ...mcpTools]
+
+        // New model: activated app instances
+        const activatedApps = this.workspace.activatedApps ?? []
+        const instanceTools: import("@/types").ToolDefinition[] = []
+        const instanceExecutors = new Map<
+          string,
+          (args: Record<string, unknown>) => Promise<unknown>
+        >()
+        for (const inst of activatedApps) {
+          const tools = mcpManager.getToolsForInstance(inst.instanceId)
+          const execs = mcpManager.getExecutorsForInstance(inst.instanceId)
+          instanceTools.push(...tools)
+          execs.forEach((fn, name) => instanceExecutors.set(name, fn))
+        }
+
+        const mergedDefs = [...toolDefs, ...mcpTools, ...instanceTools]
 
         // H3.8: Apply dynamic action space filtering based on taskIntent
         const taskIntent = workspace.agentConfig.taskIntent
@@ -414,7 +515,11 @@ export class WorkspaceAgent {
           ? filterByIntent(mergedDefs, taskIntent)
           : mergedDefs
 
-        const allExecutors = new Map([...wsTools.executors, ...mcpExecutors])
+        const allExecutors = new Map([
+          ...wsTools.executors,
+          ...mcpExecutors,
+          ...instanceExecutors,
+        ])
 
         // Apply sandbox restrictions
         const sandboxMode = workspace.sandboxMode ?? "full"
@@ -436,13 +541,31 @@ export class WorkspaceAgent {
             verificationModel: workspace.agentConfig.verificationModel,
           },
           signal: this.abortController.signal,
+          workspaceId: this.workspaceId,
           onChunk: (delta) => {
             fullContent += delta
             this.deps.updateLastMessage(this.workspaceId, { content: fullContent })
             this.callbacks.onChunk?.(delta)
           },
           onToolStart: this.callbacks.onToolStart ?? (() => {}),
-          onToolEnd: this.callbacks.onToolEnd ?? (() => {}),
+          onToolEnd: (activity) => {
+            this.callbacks.onToolEnd?.(activity)
+            // E4.5: Record tool call metric
+            const startedAt = new Date(activity.startedAt).getTime()
+            const finishedAt = activity.finishedAt
+              ? new Date(activity.finishedAt).getTime()
+              : Date.now()
+            metricsCollector.recordToolCall({
+              timestamp: activity.startedAt,
+              workspaceId: this.workspaceId,
+              toolName: activity.name,
+              success: activity.status === "done",
+              durationMs: finishedAt - startedAt,
+            })
+          },
+          onLoopComplete: (metric) => {
+            metricsCollector.recordLoopCompletion(metric)
+          },
         })
         setPermissionContext(undefined)
         // H3.6: Persist memory if tools were called
@@ -490,6 +613,8 @@ export class WorkspaceAgent {
       }
     } finally {
       this.callbacks.onStreamingChange?.(false)
+      // E4.6: Clear active sandbox after process turn completes
+      setActiveSandbox(null)
     }
 
     // Persist intermediate tool-call turns (assistant turns + tool results)
@@ -745,16 +870,23 @@ ${workspace.sandboxMode === "read-only" ? "\n⚠️ SANDBOX: This workspace is i
     const repoPath = this.workspace.repoPath
     const workspaceRoot = repoPath ?? `~/.mindeck/workspaces/${this.workspaceId}/files`
 
-    // Collect workspace apps from agent-apps store
+    // Collect apps from agent-apps store (legacy workspaceApps)
     const appsStore = useAgentAppsStore.getState()
     const wsApps: AgentAppManifest[] = appsStore.workspaceApps[this.workspaceId] ?? []
+
+    // New model: resolve activated app instance manifests from global installedApps
+    const activatedInstances = this.workspace.activatedApps ?? []
+    const installedApps = appsStore.installedApps
+    const activatedManifests: AgentAppManifest[] = activatedInstances
+      .map((inst) => installedApps.find((a) => a.id === inst.appId))
+      .filter((m): m is AgentAppManifest => m !== undefined)
 
     // Prepend native apps if workspace has a repo path
     const nativeApps: AgentAppManifest[] = repoPath
       ? [ESLINT_APP, TSC_APP, TEST_RUNNER_APP]
       : []
 
-    const allApps = [...nativeApps, ...wsApps]
+    const allApps = [...nativeApps, ...wsApps, ...activatedManifests]
     harnessEngine.start(this.workspaceId, allApps, { workspaceRoot }, this)
   }
 
@@ -781,14 +913,16 @@ ${workspace.sandboxMode === "read-only" ? "\n⚠️ SANDBOX: This workspace is i
         this.log.warn("Bound app not found for skill", { appId })
         continue
       }
-      if (manifest.source.type === "mcp" && manifest.source.config) {
+      // Connect first MCP dependency (legacy: single-MCP bound skill apps)
+      const firstDep = manifest.mcpDependencies?.[0]
+      if (firstDep) {
         const dep = {
           name: appId,
-          transport: manifest.source.config.transport,
-          command: manifest.source.config.command,
-          args: manifest.source.config.args,
-          env: manifest.source.config.env,
-          url: manifest.source.config.url,
+          transport: firstDep.transport,
+          command: firstDep.command,
+          args: firstDep.args,
+          env: firstDep.env,
+          url: firstDep.url,
         }
         this.log.debug("Connecting bound skill MCP dep", { appId })
         await mcpManager

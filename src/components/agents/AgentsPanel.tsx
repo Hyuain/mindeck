@@ -1,8 +1,119 @@
 import { useState } from "react"
-import { Bot, Cpu } from "lucide-react"
+import {
+  Bot,
+  Cpu,
+  ChevronRight,
+  ChevronDown,
+  LayoutGrid,
+  Plus,
+  Unplug,
+} from "lucide-react"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useAgentsStore } from "@/stores/agents"
+import { useAgentAppsStore } from "@/stores/agent-apps"
+import { useUIStore } from "@/stores/ui"
 import { useDragState } from "@/services/dragState"
+import type { DragPreview } from "@/services/dragState"
+import { AppCatalogPicker } from "./AppCatalogPicker"
+import type { AgentAppManifest, AppInstance } from "@/types"
+
+// ─── Helpers ───────────────────────────────────────────────
+
+function getAppRoleLabel(app: AgentAppManifest): string {
+  const parts: string[] = []
+  if (app.mcpDependencies?.length) parts.push("MCP")
+  if (app.nativeComponent) parts.push("Built-in")
+  if (app.harness?.triggers?.length) parts.push("Harness")
+  if (app.capabilities?.ui) parts.push("UI")
+  return parts.length > 0 ? parts.join(" · ") : "App"
+}
+
+// ─── AgentAppNode ──────────────────────────────────────────
+
+interface AgentAppNodeProps {
+  instance: AppInstance
+  manifest: AgentAppManifest
+  workspaceId: string
+  onPointerDown?: (e: React.PointerEvent) => void
+}
+
+function AgentAppNode({
+  instance,
+  manifest,
+  workspaceId,
+  onPointerDown,
+}: AgentAppNodeProps) {
+  const [expanded, setExpanded] = useState(false)
+  const { deactivateApp } = useAgentAppsStore()
+
+  const label = instance.label ? `${manifest.name} (${instance.label})` : manifest.name
+
+  const mcpCount = manifest.mcpDependencies?.length ?? 0
+  const triggerSummary = manifest.harness?.triggers
+    .map((t) => {
+      if (t.event === "file_written" && t.pattern) return `file_written ${t.pattern}`
+      return t.event
+    })
+    .join(", ")
+
+  return (
+    <div className="agent-app-node">
+      <div
+        className="agent-tree-item agent-app-node-row"
+        onClick={() => setExpanded((e) => !e)}
+        onPointerDown={onPointerDown}
+        style={{ userSelect: "none", cursor: onPointerDown ? "grab" : "pointer" }}
+      >
+        <div className="agent-tree-connector" />
+        <div className="agent-tree-icon sub-agent">
+          <LayoutGrid size={10} />
+        </div>
+        <span className="agent-tree-label">{label}</span>
+        {instance.label && (
+          <span className="agent-app-instance-label">{instance.label}</span>
+        )}
+        <span className="agent-app-kind-badge">{getAppRoleLabel(manifest)}</span>
+        {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+      </div>
+
+      {expanded && (
+        <div className="agent-app-node-detail">
+          {manifest.nativeComponent && (
+            <div className="agent-app-node-detail-row">
+              <span className="agent-app-node-detail-label">Type:</span>
+              <span>Built-in · {manifest.nativeComponent}</span>
+            </div>
+          )}
+          {mcpCount > 0 && (
+            <div className="agent-app-node-detail-row">
+              <span className="agent-app-node-detail-label">MCPs:</span>
+              <span>
+                {mcpCount} server{mcpCount !== 1 ? "s" : ""}
+              </span>
+            </div>
+          )}
+          {triggerSummary && (
+            <div className="agent-app-node-detail-row">
+              <span className="agent-app-node-detail-label">Triggers:</span>
+              <span className="agent-app-node-detail-trigger">{triggerSummary}</span>
+            </div>
+          )}
+          <button
+            className="agent-app-node-deactivate"
+            onClick={(e) => {
+              e.stopPropagation()
+              deactivateApp(workspaceId, instance.instanceId)
+            }}
+          >
+            <Unplug size={9} /> Deactivate
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Types ─────────────────────────────────────────────────
 
 interface AgentNode {
   id: string
@@ -10,13 +121,39 @@ interface AgentNode {
   workspaceId: string
 }
 
-export function AgentsPanel() {
-  const { workspaces, activeWorkspaceId } = useWorkspaceStore()
-  const { subAgents } = useAgentsStore()
+// ─── Main component ────────────────────────────────────────
+
+interface AgentsPanelProps {
+  workspaceId?: string
+}
+
+export function AgentsPanel({ workspaceId }: AgentsPanelProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [draggingAgentId, setDraggingAgentId] = useState<string | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
-  const handlePointerDown = (e: React.PointerEvent, agent: AgentNode) => {
+  const { workspaces, activeWorkspaceId } = useWorkspaceStore()
+  const { subAgents } = useAgentsStore()
+  const { installedApps } = useAgentAppsStore()
+  const { openAppCatalog } = useUIStore()
+
+  const activeWorkspace = workspaces.find((ws) => ws.id === activeWorkspaceId)
+  const activatedApps = activeWorkspace?.activatedApps ?? []
+
+  // Resolve instance → manifest pairs
+  const instancesWithManifest = activatedApps
+    .map((inst) => ({
+      instance: inst,
+      manifest: installedApps.find((a) => a.id === inst.appId),
+    }))
+    .filter(
+      (x): x is { instance: AppInstance; manifest: AgentAppManifest } =>
+        x.manifest !== undefined
+    )
+
+  // ── Agent drag ───────────────────────────────────────────
+
+  const startDrag = (e: React.PointerEvent, dragData: DragPreview) => {
     if (e.button !== 0) return
     e.preventDefault()
     e.stopPropagation()
@@ -26,25 +163,16 @@ export function AgentsPanel() {
     let dragInitialized = false
     let previewEl: HTMLDivElement | null = null
 
-    const dragData = {
-      id: `agent-${agent.id}-${Date.now()}`,
-      type: "agent" as const,
-      title: "Main agent",
-      workspaceId: agent.workspaceId,
-    }
-
     const initDrag = (clientX: number, clientY: number) => {
       if (dragInitialized) return
       dragInitialized = true
-
       useDragState.getState().setDragging(dragData)
       sessionStorage.setItem("pointer-drag-active", "true")
-      setDraggingAgentId(agent.id)
+      setDraggingAgentId(dragData.id)
       document.body.style.userSelect = "none"
-
       previewEl = document.createElement("div")
       previewEl.id = "drag-preview-cursor"
-      previewEl.textContent = "Main agent"
+      previewEl.textContent = dragData.title
       previewEl.style.cssText = `
         position: fixed;
         pointer-events: none;
@@ -68,9 +196,7 @@ export function AgentsPanel() {
       if (!dragInitialized) {
         const dx = moveEvent.clientX - startX
         const dy = moveEvent.clientY - startY
-        if (dx * dx + dy * dy > 25) {
-          initDrag(moveEvent.clientX, moveEvent.clientY)
-        }
+        if (dx * dx + dy * dy > 25) initDrag(moveEvent.clientX, moveEvent.clientY)
         return
       }
       if (previewEl) {
@@ -86,10 +212,7 @@ export function AgentsPanel() {
       document.removeEventListener("pointermove", handlePointerMove)
       document.removeEventListener("pointerup", handlePointerUp)
       document.removeEventListener("pointercancel", handlePointerUp)
-
-      if (!dragInitialized) {
-        sessionStorage.removeItem("pointer-drag-active")
-      }
+      if (!dragInitialized) sessionStorage.removeItem("pointer-drag-active")
     }
 
     document.addEventListener("pointermove", handlePointerMove)
@@ -97,7 +220,17 @@ export function AgentsPanel() {
     document.addEventListener("pointercancel", handlePointerUp)
   }
 
-  // Only show agents for the active workspace
+  const handlePointerDown = (e: React.PointerEvent, agent: AgentNode) => {
+    startDrag(e, {
+      id: `agent-${agent.id}-${Date.now()}`,
+      type: "agent",
+      title: "Main agent",
+      workspaceId: agent.workspaceId,
+    })
+  }
+
+  // ── Agent tree data ──────────────────────────────────────
+
   const agents: AgentNode[] = workspaces
     .filter((ws) => ws.id === activeWorkspaceId)
     .map((ws) => ({
@@ -106,63 +239,139 @@ export function AgentsPanel() {
       workspaceId: ws.id,
     }))
 
-  return (
-    <div className="agents-panel">
-      {agents.length === 0 ? (
-        <div className="agent-tree-empty">
-          <p>No active workspace</p>
-          <p style={{ marginTop: 4, opacity: 0.7 }}>
-            Select a workspace to see its agent
-          </p>
-        </div>
-      ) : (
-        <div className="agent-tree">
-          {agents.map((agent) => {
-            const isSelected = selectedAgentId === agent.id
-            const isDragging = draggingAgentId === agent.id
-            const children = subAgents[agent.workspaceId] ?? []
+  // ── Render ───────────────────────────────────────────────
 
-            return (
-              <div key={agent.id} className="agent-tree-node">
-                {/* Main agent row */}
-                <div
-                  className={`agent-tree-item ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
-                  onClick={() => setSelectedAgentId(agent.id)}
-                  onPointerDown={(e) => handlePointerDown(e, agent)}
-                  style={{ userSelect: "none", cursor: "grab" }}
-                >
-                  <div className="agent-tree-icon">
-                    <Bot size={12} />
+  return (
+    <>
+      {/* Header */}
+      <div className="agents-apps-header">
+        <div className="agents-apps-title">
+          <Bot size={12} />
+          <span>Agents</span>
+        </div>
+        <div className="agents-apps-controls">
+          <button
+            className="icon-btn"
+            onClick={openAppCatalog}
+            title="Browse Agent Apps (⌘K)"
+          >
+            <LayoutGrid size={12} />
+          </button>
+        </div>
+      </div>
+
+      {/* Unified agents + app instances tree */}
+      <div className="agents-panel">
+        {agents.length === 0 ? (
+          <div className="agent-tree-empty">
+            <p>No active workspace</p>
+            <p style={{ marginTop: 4, opacity: 0.7 }}>
+              Select a workspace to see its agent
+            </p>
+          </div>
+        ) : (
+          <div className="agent-tree">
+            {agents.map((agent) => {
+              const isSelected = selectedAgentId === agent.id
+              const isDragging = draggingAgentId === agent.id
+              const children = subAgents[agent.workspaceId] ?? []
+
+              return (
+                <div key={agent.id} className="agent-tree-node">
+                  {/* Main agent row */}
+                  <div
+                    className={`agent-tree-item ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
+                    onClick={() => setSelectedAgentId(agent.id)}
+                    onPointerDown={(e) => handlePointerDown(e, agent)}
+                    style={{ userSelect: "none", cursor: "grab" }}
+                  >
+                    <div className="agent-tree-icon">
+                      <Bot size={12} />
+                    </div>
+                    <span className="agent-tree-label">Main agent</span>
+                    {children.length > 0 && (
+                      <span className="agent-tree-count">{children.length}</span>
+                    )}
                   </div>
-                  <span className="agent-tree-label">Main agent</span>
+
+                  {/* Sub-agents spawned during this session */}
                   {children.length > 0 && (
-                    <span className="agent-tree-count">{children.length}</span>
+                    <div className="agent-tree-children">
+                      {children.map((sub) => (
+                        <div
+                          key={sub.name}
+                          className={`agent-tree-item sub-agent-item ${sub.status}`}
+                          onPointerDown={(e) =>
+                            startDrag(e, {
+                              id: `sub-${sub.name}-${Date.now()}`,
+                              type: "sub-agent",
+                              title: sub.name,
+                              workspaceId: agent.workspaceId,
+                            })
+                          }
+                          style={{ userSelect: "none", cursor: "grab" }}
+                        >
+                          <div className="agent-tree-connector" />
+                          <div className="agent-tree-icon sub-agent">
+                            <Cpu size={10} />
+                          </div>
+                          <span className="agent-tree-label sub-agent-label">
+                            {sub.name}
+                          </span>
+                          <span className={`agent-tree-status-dot ${sub.status}`} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Activated app instances */}
+                  {workspaceId && instancesWithManifest.length > 0 && (
+                    <div className="agent-tree-children">
+                      {instancesWithManifest.map(({ instance, manifest }) => (
+                        <AgentAppNode
+                          key={instance.instanceId}
+                          instance={instance}
+                          manifest={manifest}
+                          workspaceId={workspaceId}
+                          onPointerDown={(e) =>
+                            startDrag(e, {
+                              id: `app-${instance.instanceId}`,
+                              type: "app-instance",
+                              title: instance.label
+                                ? `${manifest.name} (${instance.label})`
+                                : manifest.name,
+                              workspaceId,
+                            })
+                          }
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* [+ Add App] row */}
+                  {workspaceId && (
+                    <div className="agent-app-add-row" style={{ position: "relative" }}>
+                      <button
+                        className="agent-app-add-btn"
+                        onClick={() => setPickerOpen((p) => !p)}
+                        title="Add Agent App to this workspace"
+                      >
+                        <Plus size={10} /> Add App
+                      </button>
+                      {pickerOpen && (
+                        <AppCatalogPicker
+                          workspaceId={workspaceId}
+                          onClose={() => setPickerOpen(false)}
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
-
-                {/* Sub-agent children */}
-                {children.length > 0 && (
-                  <div className="agent-tree-children">
-                    {children.map((sub) => (
-                      <div
-                        key={sub.name}
-                        className={`agent-tree-item sub-agent-item ${sub.status}`}
-                      >
-                        <div className="agent-tree-connector" />
-                        <div className="agent-tree-icon sub-agent">
-                          <Cpu size={10} />
-                        </div>
-                        <span className="agent-tree-label sub-agent-label">{sub.name}</span>
-                        <span className={`agent-tree-status-dot ${sub.status}`} />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </>
   )
 }

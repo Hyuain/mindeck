@@ -9,3 +9,8 @@ pub mod skills;
 pub mod events;
 pub mod mcp;
 pub mod memory;
+pub mod audit;
+pub mod observability;
+pub mod sandbox;
+pub mod scripts;
+pub mod apps;

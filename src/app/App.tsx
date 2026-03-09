@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react"
-import { Settings, Files, GitBranch, Bot, Sun, Moon, Sparkles } from "lucide-react"
+import { Settings, Files, GitBranch, Sun, Moon, Sparkles, BarChart2 } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
@@ -9,6 +9,7 @@ import { useMajordomoStore, initMajordomoResultListener } from "@/stores/majordo
 import { useChatStore } from "@/stores/chat"
 import { useLayoutStore } from "@/stores/layout"
 import { useTaskStore } from "@/stores/tasks"
+import { useAgentAppsStore } from "@/stores/agent-apps"
 import { useColumnResize } from "@/hooks/useColumnResize"
 import { initAppDirs } from "@/services/providers/storage"
 import { listWorkspaces, createWorkspace, newWorkspace } from "@/services/workspace"
@@ -19,6 +20,9 @@ import { registerBuiltins } from "@/services/tools/builtins"
 import { loadMajordomoMessages, MAJORDOMO_WS_ID } from "@/services/conversation"
 import { agentPool } from "@/services/agent-pool"
 import { eventBus } from "@/services/event-bus"
+import { ESLINT_APP } from "@/services/native-apps/eslint-app"
+import { TSC_APP } from "@/services/native-apps/tsc-app"
+import { TEST_RUNNER_APP } from "@/services/native-apps/test-runner-app"
 import { MajordomoPanel } from "@/components/majordomo/MajordomoPanel"
 import { ChatPanel } from "@/components/chat/ChatPanel"
 import { PreviewPanel } from "@/components/preview/PreviewPanel"
@@ -31,7 +35,8 @@ import { ProviderSettings } from "@/components/provider/ProviderSettings"
 import { CommandPalette } from "@/components/majordomo/CommandPalette"
 import { LayoutToggle } from "@/components/ui/LayoutToggle"
 import { AgentAppPane } from "@/components/workspace/AgentAppPane"
-import type { RenderableContent, Skill } from "@/types"
+import { ObservabilityDashboard } from "@/components/observability/ObservabilityDashboard"
+import type { AgentAppManifest, RenderableContent, Skill } from "@/types"
 
 export default function App() {
   const { theme, toggleTheme, openSettings, openCommandPalette } = useUIStore()
@@ -44,6 +49,7 @@ export default function App() {
   } = useWorkspaceStore()
   const { setProviders } = useProviderStore()
   const { setSkills, workspaceActiveSkillIds } = useSkillsStore()
+  const { setInstalledApps } = useAgentAppsStore()
   // useMajordomoStore still needed for initMajordomoResultListener (called in bootstrap)
   useMajordomoStore()
   const setMajordomoMessages = useChatStore((state) => state.setMessages)
@@ -78,6 +84,9 @@ export default function App() {
 
   // Right panel tab state: "files" | "skills" | "git"
   const [rightPanelTab, setRightPanelTab] = useState<"files" | "skills" | "git">("files")
+
+  // E4.5: Observability dashboard visibility
+  const [showObservability, setShowObservability] = useState(false)
 
   // Flexible workspace panes
   const [workspacePanes, setWorkspacePanes] = useState<Pane[]>([])
@@ -137,6 +146,17 @@ export default function App() {
         setProviders(provList)
         setSkills([...skillsList, ...newMdSkills])
         setMajordomoMessages(MAJORDOMO_WS_ID, majordomoMsgs)
+
+        // Seed installed apps: native apps always first, then disk-persisted apps
+        const nativeApps: AgentAppManifest[] = [ESLINT_APP, TSC_APP, TEST_RUNNER_APP]
+        const nativeIds = new Set(nativeApps.map((a) => a.id))
+        const savedApps = await invoke<AgentAppManifest[]>("load_app_registry").catch(
+          () => []
+        )
+        setInstalledApps([
+          ...nativeApps,
+          ...savedApps.filter((a) => !nativeIds.has(a.id)),
+        ])
 
         // Connect pool agents for all workspaces so dispatches work
         // regardless of which workspace is currently visible in the UI
@@ -304,6 +324,13 @@ export default function App() {
           <button className="icon-btn" onClick={toggleTheme} title="Toggle theme">
             {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
           </button>
+          <button
+            className="icon-btn"
+            onClick={() => setShowObservability(true)}
+            title="Observability"
+          >
+            <BarChart2 size={14} />
+          </button>
           <button className="icon-btn" onClick={openSettings} title="Settings (⌘,)">
             <Settings size={14} />
           </button>
@@ -402,13 +429,9 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Bottom: Agents panel - 30% */}
+              {/* Bottom: Agents + MCP Apps panel - 30% */}
               <div className="right-panel-bottom">
-                <div className="right-panel-bottom-header">
-                  <Bot size={12} />
-                  <span>Agents</span>
-                </div>
-                <AgentsPanel />
+                <AgentsPanel workspaceId={activeWorkspace?.id} />
               </div>
             </div>
           </>
@@ -418,6 +441,9 @@ export default function App() {
       {/* ── OVERLAYS ── */}
       <ProviderSettings />
       <CommandPalette />
+      {showObservability && (
+        <ObservabilityDashboard onClose={() => setShowObservability(false)} />
+      )}
     </div>
   )
 }

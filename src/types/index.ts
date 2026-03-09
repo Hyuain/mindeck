@@ -81,6 +81,10 @@ export interface MCPDependency {
   /** HTTP transport URL */
   url?: string
   toolExposure?: "direct" | "namespaced"
+  /** Whether this server is active; false = persisted but not connected (default true) */
+  enabled?: boolean
+  /** "workspace" = this workspace only; "global" = all workspaces (default workspace) */
+  scope?: "workspace" | "global"
   // Runtime (not persisted)
   status?: "connecting" | "connected" | "disconnected" | "error"
   discoveredTools?: ToolDefinition[]
@@ -109,8 +113,20 @@ export interface AgentAppManifest {
   version: string
   description: string
   icon?: string
-  kind: "orchestrator" | "tool-provider" | "autonomous" | "viewer"
-  source: { type: "mcp"; config: MCPSourceConfig } | { type: "native"; component: string }
+  // NOTE: `kind` removed — behavior is inferred from capabilities at runtime.
+
+  /**
+   * An Agent App can depend on MULTIPLE MCP servers (not just one).
+   * Each entry maps to a separate MCPClient in the pool.
+   */
+  mcpDependencies?: MCPSourceConfig[]
+
+  /**
+   * For built-in native apps (ESLint, TSC, TestRunner).
+   * Mutually exclusive with mcpDependencies (can have both in principle, but uncommon).
+   */
+  nativeComponent?: string
+
   capabilities: {
     tools?: ToolDefinition[]
     ui?: {
@@ -138,7 +154,67 @@ export interface AgentAppManifest {
   }
 }
 
+/**
+ * A workspace-local activation record for an installed Agent App.
+ * Multiple instances of the same app can coexist (e.g. two GitHub instances
+ * for different accounts), each with their own isolated MCP pool entries.
+ */
+export interface AppInstance {
+  /** UUID generated at activation time (Mindeck-managed) */
+  instanceId: string
+  /** References AgentAppManifest.id */
+  appId: string
+  /** User-assigned label to disambiguate multiple instances of the same app */
+  label?: string
+}
+
 export type SandboxMode = "read-only" | "workspace-write" | "full"
+
+// ─── Workspace Templates (E4.2) ──────────────────────────
+
+export interface WorkspaceTemplate {
+  id: string
+  name: string
+  description: string
+  icon: string
+  agentConfig?: Partial<AgentConfig>
+  mcpDependencies?: MCPDependency[]
+  sandboxMode?: SandboxMode
+  /** Appended to the workspace system prompt */
+  systemPromptAddendum?: string
+}
+
+// ─── Container Sandbox (E4.6) ────────────────────────────
+
+export interface ContainerSandboxConfig {
+  enabled: boolean
+  /** Docker image to use (default: "node:20-slim") */
+  image: string
+  networkMode: "none" | "host"
+  /** CPU count (default: 2) */
+  cpus: number
+  /** Memory in MB (default: 2048) */
+  memoryMb: number
+  /** Per-exec timeout in ms (default: 60000) */
+  timeoutMs: number
+}
+
+// ─── Script Agent App (E4.8) ─────────────────────────────
+
+export interface ScriptAgentApp {
+  id: string
+  name: string
+  filePath: string
+  description?: string
+  active: boolean
+}
+
+export interface ScriptAgentAppContext {
+  workspaceId: string
+  executeTool(name: string, args: Record<string, unknown>): Promise<unknown>
+  log(msg: string): void
+  onFileWritten(pattern: string, handler: (path: string) => Promise<void>): void
+}
 
 export interface Workspace {
   id: string
@@ -155,7 +231,14 @@ export interface Workspace {
   status: WorkspaceStatus
   lastActivity?: string
   mcpDependencies?: MCPDependency[]
+  /**
+   * Globally-installed Agent Apps activated for this workspace.
+   * Each entry is a per-workspace activation record (one app can have multiple instances).
+   */
+  activatedApps?: AppInstance[]
   sandboxMode?: SandboxMode
+  /** E4.6: Docker container isolation config (Layer 2) */
+  containerSandbox?: ContainerSandboxConfig
 }
 
 export interface FileNode {
@@ -319,11 +402,21 @@ export interface Skill {
   updatedAt: string
   /** Bound Agent App ID — ensures the corresponding app is connected when this skill is active */
   boundAppId?: string
+  /** If true, the auto-matcher will never suggest this skill; user must invoke it manually */
+  disableAutoInvoke?: boolean
+  /** Hint shown in slash command menu after the skill name e.g. "[issue-number]" */
+  argumentHint?: string
 }
 
 // ─── Tool Activity (UI state) ─────────────────────────────────
 
 export type ToolStatus = "running" | "done" | "error"
+
+export interface InjectionDetection {
+  pattern: string
+  severity: "high" | "medium" | "low"
+  snippet: string
+}
 
 export interface ToolActivity {
   id: string
@@ -335,6 +428,8 @@ export interface ToolActivity {
   finishedAt?: string
   /** Set when this activity was spawned inside a sub-agent */
   subAgent?: string
+  /** Set when a prompt injection pattern was detected in the tool result */
+  injectionWarning?: InjectionDetection
 }
 
 export interface PermissionRequest {
@@ -415,3 +510,28 @@ export interface HarnessFeedbackEvent {
   appName: string
   result: string
 }
+
+// ─── Observability Metrics (E4.5) ────────────────────────
+
+export interface ToolCallMetric {
+  timestamp: string
+  workspaceId: string
+  toolName: string
+  success: boolean
+  durationMs: number
+}
+
+export interface LoopCompletionMetric {
+  timestamp: string
+  workspaceId: string
+  toolsCalled: string[]
+  iterations: number
+  /** Character-count ÷ 4 heuristic (no real token counts from providers) */
+  estimatedTokens: number
+  durationMs: number
+  doomLoopDetected: boolean
+}
+
+export type MetricEvent =
+  | { type: "tool_call"; data: ToolCallMetric }
+  | { type: "loop_complete"; data: LoopCompletionMetric }

@@ -4,7 +4,7 @@ export type DropPosition = "left" | "right" | "top" | "bottom" | null
 
 export interface DragPreview {
   id: string
-  type: "file" | "agent"
+  type: "file" | "agent" | "sub-agent" | "app-instance"
   title: string
   filePath?: string
   workspaceId?: string

@@ -5,8 +5,7 @@ export const ESLINT_APP: AgentAppManifest = {
   name: "ESLint",
   version: "1.0.0",
   description: "Runs ESLint on changed TypeScript/JavaScript files and reports issues.",
-  kind: "autonomous",
-  source: { type: "native", component: "EslintRunner" },
+  nativeComponent: "EslintRunner",
   capabilities: { acceptsTasks: false },
   toolExposure: "isolated",
   permissions: {

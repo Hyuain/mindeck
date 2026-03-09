@@ -5,8 +5,7 @@ export const TSC_APP: AgentAppManifest = {
   name: "TypeChecker",
   version: "1.0.0",
   description: "Runs TypeScript type-checking and reports type errors.",
-  kind: "autonomous",
-  source: { type: "native", component: "TscRunner" },
+  nativeComponent: "TscRunner",
   capabilities: { acceptsTasks: false },
   toolExposure: "isolated",
   permissions: {

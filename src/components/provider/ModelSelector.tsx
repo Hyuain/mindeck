@@ -93,7 +93,7 @@ export function ModelSelector({
                       }`}
                       onClick={() => {
                         onChange(provider.id, model.id)
-                        setOpen(false)
+                        setDropdownPos(null)
                       }}
                     >
                       {model.name}

@@ -9,17 +9,21 @@ import type { MCPTool } from "./client"
  * Convert an MCP tool schema entry to a ToolDefinition.
  * If namespace is provided (dep.toolExposure === "namespaced"), prefixes the name.
  */
-export function mcpToolToDefinition(mcpTool: MCPTool, namespace?: string): ToolDefinition {
+export function mcpToolToDefinition(
+  mcpTool: MCPTool,
+  namespace?: string
+): ToolDefinition {
   const name = namespace ? `${namespace}.${mcpTool.name}` : mcpTool.name
   return {
     name,
     description: mcpTool.description,
     parameters: {
       type: "object",
-      properties: (mcpTool.inputSchema.properties as Record<
-        string,
-        { type: string; description: string }
-      >) ?? {},
+      properties:
+        (mcpTool.inputSchema.properties as Record<
+          string,
+          { type: string; description: string }
+        >) ?? {},
       required: mcpTool.inputSchema.required,
     },
   }
@@ -35,10 +39,8 @@ export function mcpDependencyToManifest(dep: MCPDependency): AgentAppManifest {
     name: dep.name,
     version: "1.0.0",
     description: `MCP server: ${dep.name}`,
-    kind: "tool-provider",
-    source: {
-      type: "mcp",
-      config: {
+    mcpDependencies: [
+      {
         transport: dep.transport,
         command: dep.command,
         args: dep.args,
@@ -46,7 +48,7 @@ export function mcpDependencyToManifest(dep: MCPDependency): AgentAppManifest {
         url: dep.url,
         discoveredTools: dep.discoveredTools,
       },
-    },
+    ],
     capabilities: {
       tools: dep.discoveredTools ?? [],
       acceptsTasks: false,

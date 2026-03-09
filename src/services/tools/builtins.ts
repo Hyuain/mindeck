@@ -9,6 +9,7 @@ import { createLogger } from "@/services/logger"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { requestPermission } from "@/services/permissions"
 import { createTask } from "@/services/task-manager"
+import { getActiveSandbox } from "@/services/workspace-agent"
 
 const log = createLogger("builtins")
 
@@ -126,13 +127,58 @@ export function registerBuiltins(): void {
         required: ["command"],
       },
     },
-    async execute(args) {
+    async execute(args, onChunk) {
       const granted = await requestPermission(
         "bash_exec",
         "Run shell command",
         args.command as string
       )
       if (!granted) throw new Error("Execution cancelled by user")
+
+      // E4.6: Route through Docker sandbox if active (Layer 2)
+      const sandbox = getActiveSandbox()
+      if (sandbox?.isRunning) {
+        const result = await sandbox.exec(
+          args.command as string,
+          args.cwd as string | undefined,
+          onChunk
+        )
+        return {
+          stdout: result.stdout,
+          stderr: result.stderr,
+          exit_code: result.exitCode,
+        }
+      }
+
+      // E4.3: Use streaming variant when caller provides an onChunk callback
+      if (onChunk) {
+        const { Channel } = await import("@tauri-apps/api/core")
+        type BashChunkEvent =
+          | { type: "stdout"; data: string }
+          | { type: "stderr"; data: string }
+          | { type: "exit"; code: number }
+        const channel = new Channel<BashChunkEvent>()
+        let stdout = ""
+        let stderr = ""
+        let exitCode = 0
+        channel.onmessage = (ev) => {
+          if (ev.type === "stdout") {
+            stdout += ev.data + "\n"
+            onChunk(ev.data)
+          } else if (ev.type === "stderr") {
+            stderr += ev.data + "\n"
+          } else if (ev.type === "exit") {
+            exitCode = ev.code
+          }
+        }
+        await invoke("bash_exec_stream", {
+          command: args.command,
+          cwd: args.cwd ?? null,
+          onEvent: channel,
+        })
+        return { stdout, stderr, exit_code: exitCode }
+      }
+
       return invoke("bash_exec", { command: args.command, cwd: args.cwd ?? null })
     },
   })
@@ -151,6 +197,12 @@ export function registerBuiltins(): void {
       },
     },
     async execute(args) {
+      const granted = await requestPermission(
+        "web_fetch",
+        "Fetch URL",
+        args.url as string
+      )
+      if (!granted) throw new Error("Fetch cancelled by user")
       const res = await fetch(args.url as string)
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
       return res.text()

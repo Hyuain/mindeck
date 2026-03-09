@@ -1,5 +1,5 @@
 import { useState, useEffect, useId } from "react"
-import { X, Package, User, Monitor, Database, Link } from "lucide-react"
+import { X, Package, User, Monitor, Database, Link, Plug } from "lucide-react"
 import { useProviderStore } from "@/stores/provider"
 import { useUIStore } from "@/stores/ui"
 import { listProviders, saveProvider, deleteProvider } from "@/services/providers/storage"
@@ -7,6 +7,7 @@ import { setApiKey, deleteApiKey } from "@/services/providers/keychain"
 import { probeUrl } from "@/services/providers/bridge"
 import { PROVIDER_MODELS } from "@/services/providers/models"
 import { ProviderCard } from "./ProviderCard"
+import { MCPConnectionsView } from "./MCPConnectionsView"
 import type { ProviderConfig } from "@/types"
 import type { HealthStatus } from "@/services/providers/types"
 
@@ -55,6 +56,7 @@ const NAV = [
   { id: "appearance", label: "Appearance", Icon: Monitor },
   { id: "storage", label: "Storage", Icon: Database },
   { id: "shortcuts", label: "Shortcuts", Icon: Link },
+  { id: "mcp", label: "MCP Servers", Icon: Plug },
 ]
 
 // ─── Add provider form ────────────────────────────────────────
@@ -368,11 +370,13 @@ export function ProviderSettings() {
               </>
             )}
 
-            {nav !== "providers" && (
+            {nav !== "providers" && nav !== "mcp" && (
               <div style={{ color: "var(--color-t2)", fontSize: 12, marginTop: 8 }}>
                 Coming soon.
               </div>
             )}
+
+            {nav === "mcp" && <MCPConnectionsView />}
           </div>
         </div>
 
