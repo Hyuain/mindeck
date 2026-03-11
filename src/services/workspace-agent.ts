@@ -46,6 +46,27 @@ import type {
   Workspace,
 } from "@/types"
 
+/**
+ * Generate a system Agent App manifest for the Orchestrator in a given workspace.
+ * This manifest is `kind: "system"` and is NOT shown in the Apps UI.
+ */
+export function generateOrchestratorManifest(workspace: Workspace): AgentAppManifest {
+  return {
+    id: `system.orchestrator.${workspace.id}`,
+    name: "Orchestrator",
+    kind: "system",
+    version: "1.0.0",
+    description: `Orchestrator for workspace "${workspace.name}". Manages planning, execution, and verification phases.`,
+    icon: "🎯",
+    mcpDependencies:
+      workspace.orchestratorConfig?.mcpDependencies ?? workspace.mcpDependencies,
+    capabilities: {},
+    toolExposure: "direct",
+    permissions: { filesystem: "workspace-only", network: "full", shell: true },
+    lifecycle: { startup: "eager", persistence: "workspace" },
+  }
+}
+
 export interface AgentDeps {
   getMessages: (workspaceId: string) => Message[]
   appendMessage: (workspaceId: string, msg: Message) => void
@@ -234,7 +255,11 @@ export class WorkspaceAgent {
     )
 
     // Connect MCP dependencies (non-blocking; best-effort)
-    const deps = this.workspace.mcpDependencies ?? []
+    // Prefer orchestratorConfig.mcpDependencies (new model), fall back to workspace.mcpDependencies (legacy)
+    const deps =
+      this.workspace.orchestratorConfig?.mcpDependencies ??
+      this.workspace.mcpDependencies ??
+      []
     if (deps.length > 0) {
       mcpManager
         .connectWorkspaceDeps(this.workspaceId, deps)

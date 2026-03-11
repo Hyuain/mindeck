@@ -64,8 +64,8 @@ export function AppCatalogPicker({ workspaceId, onClose }: AppCatalogPickerProps
     onClose()
   }
 
-  const nativeApps = filtered.filter((a) => a.nativeComponent)
-  const mcpApps = filtered.filter((a) => !a.nativeComponent)
+  const nativeApps = filtered.filter((a) => a.kind === "native")
+  const mcpApps = filtered.filter((a) => a.kind === "custom")
 
   return (
     <div ref={ref} className="app-picker-popover">

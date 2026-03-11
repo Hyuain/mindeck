@@ -107,13 +107,16 @@ export interface HarnessTrigger {
   toolName?: string
 }
 
+export type AgentAppKind = "system" | "native" | "custom"
+
 export interface AgentAppManifest {
   id: string
   name: string
   version: string
   description: string
   icon?: string
-  // NOTE: `kind` removed — behavior is inferred from capabilities at runtime.
+  /** system = always present (Majordomo, Orchestrator), native = shipped built-in, custom = user-installed */
+  kind: AgentAppKind
 
   /**
    * An Agent App can depend on MULTIPLE MCP servers (not just one).
@@ -169,6 +172,16 @@ export interface AppInstance {
 }
 
 export type SandboxMode = "read-only" | "workspace-write" | "full"
+
+/** Configuration for the Orchestrator (system agent app) in a workspace */
+export interface OrchestratorConfig {
+  /** MCP dependencies owned by the Orchestrator (migrated from workspace.mcpDependencies) */
+  mcpDependencies?: MCPDependency[]
+  /** Sandbox restrictions for the orchestrator */
+  sandboxMode?: SandboxMode
+  /** Docker container sandbox config */
+  containerSandbox?: ContainerSandboxConfig
+}
 
 // ─── Workspace Templates (E4.2) ──────────────────────────
 
@@ -230,7 +243,10 @@ export interface Workspace {
   stateSummary?: string
   status: WorkspaceStatus
   lastActivity?: string
+  /** @deprecated Use orchestratorConfig.mcpDependencies instead */
   mcpDependencies?: MCPDependency[]
+  /** Orchestrator (system agent app) configuration for this workspace */
+  orchestratorConfig?: OrchestratorConfig
   /**
    * Globally-installed Agent Apps activated for this workspace.
    * Each entry is a per-workspace activation record (one app can have multiple instances).

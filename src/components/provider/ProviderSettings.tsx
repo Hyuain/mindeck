@@ -1,7 +1,8 @@
 import { useState, useEffect, useId } from "react"
-import { X, Package, User, Monitor, Database, Link, Plug } from "lucide-react"
+import { X, Package, User, Monitor, Database, Link, Plug, Sparkles } from "lucide-react"
 import { useProviderStore } from "@/stores/provider"
 import { useUIStore } from "@/stores/ui"
+import { useMajordomoStore } from "@/stores/majordomo"
 import { listProviders, saveProvider, deleteProvider } from "@/services/providers/storage"
 import { setApiKey, deleteApiKey } from "@/services/providers/keychain"
 import { probeUrl } from "@/services/providers/bridge"
@@ -52,6 +53,7 @@ const PRESETS = [
 
 const NAV = [
   { id: "providers", label: "Providers", Icon: Package },
+  { id: "majordomo", label: "Majordomo", Icon: Sparkles },
   { id: "general", label: "General", Icon: User },
   { id: "appearance", label: "Appearance", Icon: Monitor },
   { id: "storage", label: "Storage", Icon: Database },
@@ -274,6 +276,69 @@ function AddProviderForm({ onAdded }: { onAdded: () => void }) {
   )
 }
 
+// ─── Majordomo Settings tab ──────────────────────────────────
+
+function MajordomoSettingsTab() {
+  const { providers } = useProviderStore()
+  const mjStore = useMajordomoStore()
+  const selectedProvider = providers.find((p) => p.id === mjStore.selectedProviderId)
+  const models = selectedProvider?.models ?? []
+
+  return (
+    <>
+      <div className="s-label">Majordomo</div>
+      <div className="s-sub">
+        Configure the global orchestrator. Majordomo coordinates across all workspaces.
+      </div>
+
+      {/* Model selection */}
+      <div className="fg" style={{ marginTop: 12 }}>
+        <label className="fl">Provider</label>
+        <select
+          className="fi"
+          value={mjStore.selectedProviderId ?? ""}
+          onChange={(e) => {
+            const pid = e.target.value
+            const firstModel = providers.find((p) => p.id === pid)?.models?.[0]?.id ?? ""
+            mjStore.setModel(pid, firstModel)
+          }}
+        >
+          <option value="">— Select provider —</option>
+          {providers.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {models.length > 0 && (
+        <div className="fg" style={{ marginTop: 8 }}>
+          <label className="fl">Model</label>
+          <select
+            className="fi"
+            value={mjStore.selectedModelId ?? ""}
+            onChange={(e) => mjStore.setModel(mjStore.selectedProviderId, e.target.value)}
+          >
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+                {m.contextLength != null
+                  ? ` — ${(m.contextLength / 1000).toFixed(0)}k ctx`
+                  : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div className="fi-hint" style={{ marginTop: 8 }}>
+        Majordomo uses this model for cross-workspace orchestration and task delegation.
+      </div>
+    </>
+  )
+}
+
 // ─── Main ProviderSettings component ─────────────────────────
 
 export function ProviderSettings() {
@@ -370,11 +435,13 @@ export function ProviderSettings() {
               </>
             )}
 
-            {nav !== "providers" && nav !== "mcp" && (
+            {nav !== "providers" && nav !== "mcp" && nav !== "majordomo" && (
               <div style={{ color: "var(--color-t2)", fontSize: 12, marginTop: 8 }}>
                 Coming soon.
               </div>
             )}
+
+            {nav === "majordomo" && <MajordomoSettingsTab />}
 
             {nav === "mcp" && <MCPConnectionsView />}
           </div>

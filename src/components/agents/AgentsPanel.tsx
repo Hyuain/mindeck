@@ -7,6 +7,9 @@ import {
   LayoutGrid,
   Plus,
   Unplug,
+  Settings,
+  RefreshCw,
+  PowerOff,
 } from "lucide-react"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useAgentsStore } from "@/stores/agents"
@@ -15,17 +18,30 @@ import { useUIStore } from "@/stores/ui"
 import { useDragState } from "@/services/dragState"
 import type { DragPreview } from "@/services/dragState"
 import { AppCatalogPicker } from "./AppCatalogPicker"
+import { ContextMenu } from "@/components/ui/ContextMenu"
+import type { ContextMenuItem } from "@/components/ui/ContextMenu"
 import type { AgentAppManifest, AppInstance } from "@/types"
 
 // ─── Helpers ───────────────────────────────────────────────
 
 function getAppRoleLabel(app: AgentAppManifest): string {
+  if (app.kind === "native") return "Native"
+  if (app.kind === "system") return "System"
   const parts: string[] = []
   if (app.mcpDependencies?.length) parts.push("MCP")
-  if (app.nativeComponent) parts.push("Built-in")
   if (app.harness?.triggers?.length) parts.push("Harness")
   if (app.capabilities?.ui) parts.push("UI")
   return parts.length > 0 ? parts.join(" · ") : "App"
+}
+
+// ─── Context menu state ──────────────────────────────────
+
+interface ContextMenuState {
+  position: { x: number; y: number }
+  items: ContextMenuItem[]
+  target:
+    | { type: "orchestrator"; workspaceId: string }
+    | { type: "app"; workspaceId: string; instanceId: string; appId: string }
 }
 
 // ─── AgentAppNode ──────────────────────────────────────────
@@ -35,6 +51,7 @@ interface AgentAppNodeProps {
   manifest: AgentAppManifest
   workspaceId: string
   onPointerDown?: (e: React.PointerEvent) => void
+  onContextMenu?: (e: React.MouseEvent) => void
 }
 
 function AgentAppNode({
@@ -42,6 +59,7 @@ function AgentAppNode({
   manifest,
   workspaceId,
   onPointerDown,
+  onContextMenu,
 }: AgentAppNodeProps) {
   const [expanded, setExpanded] = useState(false)
   const { deactivateApp } = useAgentAppsStore()
@@ -62,6 +80,7 @@ function AgentAppNode({
         className="agent-tree-item agent-app-node-row"
         onClick={() => setExpanded((e) => !e)}
         onPointerDown={onPointerDown}
+        onContextMenu={onContextMenu}
         style={{ userSelect: "none", cursor: onPointerDown ? "grab" : "pointer" }}
       >
         <div className="agent-tree-connector" />
@@ -125,16 +144,23 @@ interface AgentNode {
 
 interface AgentsPanelProps {
   workspaceId?: string
+  onOpenOrchestratorSettings?: () => void
+  onOpenAppSettings?: (instanceId: string, appId: string) => void
 }
 
-export function AgentsPanel({ workspaceId }: AgentsPanelProps) {
+export function AgentsPanel({
+  workspaceId,
+  onOpenOrchestratorSettings,
+  onOpenAppSettings,
+}: AgentsPanelProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [draggingAgentId, setDraggingAgentId] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
   const { workspaces, activeWorkspaceId } = useWorkspaceStore()
   const { subAgents } = useAgentsStore()
-  const { installedApps } = useAgentAppsStore()
+  const { installedApps, deactivateApp } = useAgentAppsStore()
   const { openAppCatalog } = useUIStore()
 
   const activeWorkspace = workspaces.find((ws) => ws.id === activeWorkspaceId)
@@ -150,6 +176,80 @@ export function AgentsPanel({ workspaceId }: AgentsPanelProps) {
       (x): x is { instance: AppInstance; manifest: AgentAppManifest } =>
         x.manifest !== undefined
     )
+
+  // ── Context menu handlers ─────────────────────────────────
+
+  function handleOrchestratorContextMenu(e: React.MouseEvent, wsId: string) {
+    e.preventDefault()
+    e.stopPropagation()
+    const items: ContextMenuItem[] = [
+      { id: "reconnect-mcp", label: "Reconnect MCP", icon: <RefreshCw size={11} /> },
+      {
+        id: "settings",
+        label: "Settings…",
+        icon: <Settings size={11} />,
+        dividerBefore: true,
+      },
+    ]
+    setContextMenu({
+      position: { x: e.clientX, y: e.clientY },
+      items,
+      target: { type: "orchestrator", workspaceId: wsId },
+    })
+  }
+
+  function handleAppContextMenu(
+    e: React.MouseEvent,
+    wsId: string,
+    instanceId: string,
+    appId: string
+  ) {
+    e.preventDefault()
+    e.stopPropagation()
+    const manifest = installedApps.find((a) => a.id === appId)
+    const isCustom = manifest?.kind === "custom"
+    const items: ContextMenuItem[] = [
+      { id: "reconnect", label: "Reconnect", icon: <RefreshCw size={11} /> },
+      { id: "app-settings", label: "Settings…", icon: <Settings size={11} /> },
+      {
+        id: "deactivate",
+        label: "Deactivate",
+        icon: <PowerOff size={11} />,
+        danger: true,
+        dividerBefore: true,
+      },
+    ]
+    if (isCustom) {
+      items.push({
+        id: "uninstall",
+        label: "Uninstall",
+        icon: <Unplug size={11} />,
+        danger: true,
+      })
+    }
+    setContextMenu({
+      position: { x: e.clientX, y: e.clientY },
+      items,
+      target: { type: "app", workspaceId: wsId, instanceId, appId },
+    })
+  }
+
+  function handleContextMenuSelect(id: string) {
+    if (!contextMenu) return
+    const { target } = contextMenu
+    if (target.type === "orchestrator") {
+      if (id === "settings") onOpenOrchestratorSettings?.()
+      // reconnect-mcp handled elsewhere (future wiring)
+    } else if (target.type === "app") {
+      if (id === "app-settings") onOpenAppSettings?.(target.instanceId, target.appId)
+      if (id === "deactivate") deactivateApp(target.workspaceId, target.instanceId)
+      if (id === "uninstall") {
+        deactivateApp(target.workspaceId, target.instanceId)
+        useAgentAppsStore.getState().removeApp(target.appId)
+      }
+    }
+    setContextMenu(null)
+  }
 
   // ── Agent drag ───────────────────────────────────────────
 
@@ -224,7 +324,7 @@ export function AgentsPanel({ workspaceId }: AgentsPanelProps) {
     startDrag(e, {
       id: `agent-${agent.id}-${Date.now()}`,
       type: "agent",
-      title: "Main agent",
+      title: "Orchestrator",
       workspaceId: agent.workspaceId,
     })
   }
@@ -278,17 +378,20 @@ export function AgentsPanel({ workspaceId }: AgentsPanelProps) {
 
               return (
                 <div key={agent.id} className="agent-tree-node">
-                  {/* Main agent row */}
+                  {/* Orchestrator row */}
                   <div
                     className={`agent-tree-item ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
                     onClick={() => setSelectedAgentId(agent.id)}
                     onPointerDown={(e) => handlePointerDown(e, agent)}
+                    onContextMenu={(e) =>
+                      handleOrchestratorContextMenu(e, agent.workspaceId)
+                    }
                     style={{ userSelect: "none", cursor: "grab" }}
                   >
                     <div className="agent-tree-icon">
                       <Bot size={12} />
                     </div>
-                    <span className="agent-tree-label">Main agent</span>
+                    <span className="agent-tree-label">Orchestrator</span>
                     {children.length > 0 && (
                       <span className="agent-tree-count">{children.length}</span>
                     )}
@@ -343,6 +446,14 @@ export function AgentsPanel({ workspaceId }: AgentsPanelProps) {
                               workspaceId,
                             })
                           }
+                          onContextMenu={(e) =>
+                            handleAppContextMenu(
+                              e,
+                              workspaceId,
+                              instance.instanceId,
+                              instance.appId
+                            )
+                          }
                         />
                       ))}
                     </div>
@@ -372,6 +483,16 @@ export function AgentsPanel({ workspaceId }: AgentsPanelProps) {
           </div>
         )}
       </div>
+
+      {/* Context menu portal */}
+      {contextMenu && (
+        <ContextMenu
+          items={contextMenu.items}
+          position={contextMenu.position}
+          onSelect={handleContextMenuSelect}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </>
   )
 }

@@ -25,9 +25,28 @@ import type {
   ToolDefinition,
   Workspace,
   WorkspaceSummary,
+  AgentAppManifest,
 } from "@/types"
 
 const log = createLogger("MajordomoAgent")
+
+/**
+ * System Agent App manifest for Majordomo.
+ * `kind: "system"` — always present, hidden from Apps UI.
+ */
+export const MAJORDOMO_MANIFEST: AgentAppManifest = {
+  id: "system.majordomo",
+  name: "Majordomo",
+  kind: "system",
+  version: "1.0.0",
+  description:
+    "Global cross-workspace orchestrator. Coordinates tasks across all workspaces.",
+  icon: "🎩",
+  capabilities: {},
+  toolExposure: "direct",
+  permissions: { filesystem: "none", network: "full", shell: false },
+  lifecycle: { startup: "eager", persistence: "workspace" },
+}
 
 /** Additional tool-use notice prepended to system prompt for weak function-callers. */
 const WEAK_FC_PREAMBLE = `⚠️ TOOL-CALLING NOTICE: This model has limited native function-calling support.

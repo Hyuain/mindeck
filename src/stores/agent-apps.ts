@@ -65,8 +65,8 @@ async function persistActivatedApps(
  * Fire-and-forget.
  */
 async function persistAppRegistry(apps: AgentAppManifest[]): Promise<void> {
-  // Native apps are always seeded in memory — don't write them to disk
-  const toSave = apps.filter((a) => !a.nativeComponent)
+  // Native and system apps are always seeded in memory — don't write them to disk
+  const toSave = apps.filter((a) => a.kind === "custom")
   try {
     await invoke("save_app_registry", { apps: toSave })
   } catch (err) {

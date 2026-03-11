@@ -36,6 +36,8 @@ import { CommandPalette } from "@/components/majordomo/CommandPalette"
 import { LayoutToggle } from "@/components/ui/LayoutToggle"
 import { AgentAppPane } from "@/components/workspace/AgentAppPane"
 import { ObservabilityDashboard } from "@/components/observability/ObservabilityDashboard"
+import { OrchestratorSettings } from "@/components/workspace/OrchestratorSettings"
+import { AgentAppSettings } from "@/components/workspace/AgentAppSettings"
 import type { AgentAppManifest, RenderableContent, Skill } from "@/types"
 
 export default function App() {
@@ -87,6 +89,15 @@ export default function App() {
 
   // E4.5: Observability dashboard visibility
   const [showObservability, setShowObservability] = useState(false)
+
+  // Orchestrator Settings modal
+  const [showOrchestratorSettings, setShowOrchestratorSettings] = useState(false)
+
+  // Agent App Settings modal
+  const [appSettingsTarget, setAppSettingsTarget] = useState<{
+    instanceId: string
+    appId: string
+  } | null>(null)
 
   // Flexible workspace panes
   const [workspacePanes, setWorkspacePanes] = useState<Pane[]>([])
@@ -431,7 +442,13 @@ export default function App() {
 
               {/* Bottom: Agents + MCP Apps panel - 30% */}
               <div className="right-panel-bottom">
-                <AgentsPanel workspaceId={activeWorkspace?.id} />
+                <AgentsPanel
+                  workspaceId={activeWorkspace?.id}
+                  onOpenOrchestratorSettings={() => setShowOrchestratorSettings(true)}
+                  onOpenAppSettings={(instanceId, appId) =>
+                    setAppSettingsTarget({ instanceId, appId })
+                  }
+                />
               </div>
             </div>
           </>
@@ -443,6 +460,19 @@ export default function App() {
       <CommandPalette />
       {showObservability && (
         <ObservabilityDashboard onClose={() => setShowObservability(false)} />
+      )}
+      {showOrchestratorSettings && activeWorkspace && (
+        <OrchestratorSettings
+          workspaceId={activeWorkspace.id}
+          onClose={() => setShowOrchestratorSettings(false)}
+        />
+      )}
+      {appSettingsTarget && (
+        <AgentAppSettings
+          instanceId={appSettingsTarget.instanceId}
+          appId={appSettingsTarget.appId}
+          onClose={() => setAppSettingsTarget(null)}
+        />
       )}
     </div>
   )

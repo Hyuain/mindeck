@@ -37,6 +37,7 @@ export function mcpDependencyToManifest(dep: MCPDependency): AgentAppManifest {
   return {
     id: `mcp:${dep.name}`,
     name: dep.name,
+    kind: "custom",
     version: "1.0.0",
     description: `MCP server: ${dep.name}`,
     mcpDependencies: [
