@@ -40,18 +40,17 @@ Minimal config — just enough to connect and expose tools:
 ```typescript
 interface MCPDependency {
   name: string                        // namespace key, e.g. "web-search"
-  command: string                     // "npx @mcp/server-web-search"
+  transport: "stdio" | "streamable-http"
+  command?: string                    // for stdio transport, e.g. "npx @mcp/server-web-search"
   args?: string[]
   env?: Record<string, string>
-  transport: "stdio" | "streamable-http"
   url?: string                        // for HTTP transport
   toolExposure?: "direct" | "namespaced"  // default: "namespaced"
   enabled?: boolean                   // toggle without delete
   scope?: "workspace" | "global"      // typed but not yet enforced
-  sharedConnection?: boolean          // default: false (isolated)
 
   // Runtime (auto-managed)
-  status?: "connected" | "disconnected" | "error"
+  status?: "connecting" | "connected" | "disconnected" | "error"
   discoveredTools?: ToolDefinition[]
 }
 ```
@@ -71,7 +70,7 @@ MCP is a stateful protocol. Concurrent clients can cause response mixing and sta
 - Separate session for HTTP transport
 - `{workspaceId}:{depName}` keys for workspace deps
 - `{instanceId}:{depName}` keys for app instances
-- Shared connections opt-in via `sharedConnection: true`, never cross workspace boundaries
+- Shared connections not yet implemented (field reserved for future use)
 
 ---
 

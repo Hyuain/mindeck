@@ -12,6 +12,8 @@ Being "just an MCP client" makes Mindeck a commodity — Cursor, VS Code, Claude
 
 ### Why four kinds (orchestrator, tool-provider, autonomous, viewer)?
 
+> **Implementation note**: The four-kind system was simplified to `"system" | "native" | "custom"` in the implementation. See [design-divergences.md](./design-divergences.md#divergence-1).
+
 Without this distinction, users see a flat list of "apps" with wildly different behaviors. Some consume tokens, some don't. Some take minutes, some are instant. The kinds make expectations clear and enable appropriate lifecycle management.
 
 ### Why namespaced tool exposure by default?
@@ -42,7 +44,9 @@ Yes — MCP is stateful and the spec leaves session isolation to server implemen
 
 A Skill (system prompt + tool subset) is effectively a headless, ephemeral Agent App with no UI. Long-term, Skills could migrate into the Agent App system. Short-term, they coexist — Skills modify the main agent's behavior, Agent Apps run alongside it.
 
-### Why is the Main Agent an Agent App (kind: "orchestrator")?
+### Why is the Main Agent an Agent App (kind: "orchestrator")? *(design target)*
+
+> **Implementation note**: The orchestrator is **not** yet modeled as an Agent App. See [design-divergences.md](./design-divergences.md#divergence-3).
 
 The Main Agent uses `bash_exec`, `write_file`, `delete_path` — the same tools as Agent Apps. If sandbox only applies to "other" apps but not the orchestrator, there's a gaping hole. By modeling it as an Agent App:
 
@@ -57,7 +61,7 @@ The orchestrator is still special (singleton, non-removable, has orchestration p
 
 1. **Developer experience** — mandatory sandboxing adds friction. Most personal dev workspaces don't need container isolation
 2. **Performance** — Layer 2/3 add latency to every tool call
-3. **Progressive trust** — `read-only` for reviewing untrusted code, `workspace-write` for daily dev, `full-access` for DevOps. Default (`workspace-write` + Tauri enforcement) is safe enough while remaining zero-config
+3. **Progressive trust** — `read-only` for reviewing untrusted code, `workspace-write` for daily dev, `full` for DevOps. Default (`workspace-write` + Tauri enforcement) is safe enough while remaining zero-config
 
 ### Why three sandbox layers instead of just Docker?
 

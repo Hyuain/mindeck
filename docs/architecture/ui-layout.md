@@ -83,7 +83,7 @@ type PaneType = "agent" | "file" | "agent-app"
 
 **Accents**:
 - `--color-ac`: Workspace accent (emerald `#10b981`)
-- `--color-sa`: Majordomo accent (violet `#a78bfa`)
+- `--color-mj`: Majordomo accent (violet `#a78bfa`)
 
 **Typography**:
 - `--font-sans`: Plus Jakarta Sans (UI text)

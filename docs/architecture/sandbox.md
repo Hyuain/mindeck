@@ -23,7 +23,7 @@ Per-workspace, inspired by OpenAI Codex:
 
 ```
 ┌───────────────┬─────────────────────┬────────────────────────────────┐
-│  read-only    │  workspace-write    │  full-access                   │
+│  read-only    │  workspace-write    │  full                          │
 │  (safest)     │  (default)          │  (power user)                  │
 ├───────────────┼─────────────────────┼────────────────────────────────┤
 │ list_dir  ✅  │ list_dir  ✅        │ list_dir  ✅                   │
@@ -43,7 +43,7 @@ Per-workspace, inspired by OpenAI Codex:
 |------|-----------|-------|---------|----------|
 | `read-only` | Read within workspace | Blocked | Blocked | Code review, analysis |
 | `workspace-write` | Read anywhere; write inside workspace only | Allowlisted commands | Allowed (optional domain allowlist) | Default for development |
-| `full-access` | Unrestricted | Unrestricted (prompt still fires) | Unrestricted | DevOps, power users |
+| `full` | Unrestricted | Unrestricted (prompt still fires) | Unrestricted | DevOps, power users |
 
 ---
 
@@ -69,6 +69,8 @@ Sub-Agent B ───┘    (one per workspace)
 ```
 
 ```typescript
+// DESIGN TARGET — not yet in src/types/index.ts
+// See decisions/design-divergences.md#divergence-5
 interface SandboxPolicy {
   mode: SandboxMode
   workspaceRoot: string
@@ -90,7 +92,7 @@ type SandboxDecision =
   | { allowed: false; reason: string }
 ```
 
-**Status**: `read-only` blocking works. `workspace-write` enforcement **not yet implemented**.
+**Status**: These types are **not yet implemented** in the codebase. Current implementation uses only `SandboxMode = "read-only" | "workspace-write" | "full"` and `ContainerSandboxConfig`. `read-only` blocking works. `workspace-write` enforcement **not yet implemented**.
 
 ### Layer 2: Container Isolation (Docker)
 
@@ -189,15 +191,16 @@ This prevents wasted iterations on denied operations.
 ## Configuration
 
 ```typescript
+// DESIGN TARGET — actual implementation uses SandboxMode + ContainerSandboxConfig directly
 interface SandboxConfig {
-  mode: "read-only" | "workspace-write" | "full-access"
+  mode: "read-only" | "workspace-write" | "full"
   enforcement?: "tauri" | "container" | "microvm"   // auto-detected if omitted
   shellAllowlist?: string[]
   networkAllowlist?: string[]
   additionalWritePaths?: string[]
   toolOverrides?: Record<string, "allow" | "deny" | "prompt">
   container?: ContainerSandboxConfig
-  microvm?: MicroVMSandboxConfig
+  microvm?: MicroVMSandboxConfig                    // not yet implemented
 }
 ```
 

@@ -2,73 +2,67 @@
 
 > Where implementation consciously diverged from the Agent App design spec.
 > These are deliberate simplifications, not bugs.
+>
+> Related: [agent-apps](../architecture/agent-apps.md) · [sandbox](../architecture/sandbox.md) · [status](../status.md)
 
 ---
 
-## Summary
+## Divergence 1: `kind` Redefined
 
-The Agent App design spec was written as a target architecture. During implementation, several simplifications were made for pragmatic reasons. Each divergence should either be backported to the design or the design updated to match.
+**Design**: `kind: "orchestrator" | "tool-provider" | "autonomous" | "viewer"` — behavioral categorization for lifecycle and interaction model.
 
----
+**Implementation**: `kind: "system" | "native" | "custom"` — classifies by origin, not behavior. Behavioral differences inferred from capabilities at runtime.
 
-## Divergence 1: `kind` Removed from AgentAppManifest
+**Impact**: A MCP tool-provider and an autonomous agent with the same `kind: "custom"` are indistinguishable at the type level.
 
-**Design**: `kind: "orchestrator" | "tool-provider" | "autonomous" | "viewer"` — explicit categorization for lifecycle, resource consumption, and interaction model decisions.
-
-**Implementation**: `kind` field removed. Comment in code: "behavior is inferred from capabilities at runtime."
-
-**Impact**: Simpler manifest, but loses the explicit categorization the design uses to determine lifecycle management. A tool-provider and an autonomous app with the same capabilities would be indistinguishable.
-
-**Decision needed**: Re-add `kind` for explicit lifecycle management, or formally document the capability-inference approach.
+**Decision needed**: Adopt behavioral kinds alongside origin kinds, or formally document capability-inference as the intended approach.
 
 ---
 
-## Divergence 2: `source` Union Replaced with Flat Fields
+## Divergence 2: `source` Union → Flat Fields
 
-**Design**: Discriminated union — `source: { type: "mcp"; config: MCPSourceConfig } | { type: "native"; component: string } | ...`
+**Design**: Discriminated union — `source: { type: "mcp"; config } | { type: "native"; component } | ...`
 
-**Implementation**: Two optional fields — `mcpDependencies?: MCPSourceConfig[]` + `nativeComponent?: string`
+**Implementation**: Flat optional fields — `mcpDependencies?: MCPSourceConfig[]` + `nativeComponent?: string`
 
-**Impact**: Easier to serialize/store, but loses the discriminated union's type safety. An app could theoretically have both `mcpDependencies` and `nativeComponent` set, which is invalid.
-
----
-
-## Divergence 3: Orchestrator Not Modeled as Agent App
-
-**Design**: WorkspaceAgent becomes `kind: "orchestrator"` Agent App with auto-generated manifest. Unified sandbox enforcement, audit trails.
-
-**Implementation**: WorkspaceAgent is a completely separate class from the Agent App system. No implicit manifest, no shared sandbox enforcement path.
-
-**Impact**:
-- No unified type system — "everything that runs tools is an Agent App" is not true in code
-- WorkspaceAgent has its own ad-hoc sandbox logic (separate from Agent App enforcement)
-- Cannot swap orchestrators in the future
-
-This is the largest architectural divergence. Conscious simplification for initial implementation speed.
+**Impact**: Easier to serialize, but an app could have both fields set (invalid state). Consider a runtime validator or discriminated union in a future refactor.
 
 ---
 
-## Divergence 4: Minor Type Simplifications
+## Divergence 3: Orchestrator Separate from Agent App System
+
+**Design**: WorkspaceAgent becomes `kind: "orchestrator"` Agent App — unified sandbox enforcement, audit trails, swappable orchestrators.
+
+**Implementation**: WorkspaceAgent is a separate class. It has `generateOrchestratorManifest()` which creates a runtime manifest, partially bridging the gap — but it does not go through the Agent App lifecycle or sandbox enforcement path.
+
+**What works**: Runtime manifest generation, tool coordination, sub-agent spawning.
+
+**What's missing**: Unified sandbox enforcement (WorkspaceAgent has its own path), orchestrator swapping, consistent type system ("everything that runs tools is an Agent App" is not true in code).
+
+---
+
+## Divergence 4: Type Simplifications
 
 | Design | Implementation | Notes |
 |--------|---------------|-------|
-| `SandboxMode: "full-access"` | `"full"` | Cosmetic naming |
-| `ContainerSandboxConfig.resourceLimits.cpus` | `cpus` (flat) | Simpler structure |
-| `permissions.network: "none" \| "same-origin" \| "full"` | `"none" \| "full"` | No same-origin option |
-| `capabilities.emitsEvents?` | Not present | Minor omission |
+| `SandboxMode: "full-access"` | `"full"` | Cosmetic rename |
+| `permissions.network: "none" \| "same-origin" \| "full"` | `"none" \| "full"` | `same-origin` not yet needed |
+| `ContainerSandboxConfig.resourceLimits.cpus` | `cpus` (flat) | Simplified nesting |
+| `capabilities.emitsEvents?` | Not present | Not yet needed |
 | `permissions.invokeOtherApps` | Not present | Not yet needed |
 | `lifecycle.healthCheckInterval` | Not present | Not yet needed |
+| `AgentAppManifest.author` | Not present | Not yet needed |
+| `capabilities.ui.minHeight` | Not present | Only `minWidth` implemented |
 
 ---
 
-## Divergence 5: Missing Type Definitions
+## Divergence 5: Unimplemented Sandbox Types
 
-These types from the design spec are not yet in `src/types/index.ts`:
+These types from the design spec are not yet in `src/types/index.ts`. See [sandbox.md](../architecture/sandbox.md) for the design targets.
 
-- `SandboxEnforcementLayer` — auto-detected rather than configurable
-- `SandboxDecision` — enforcer returns boolean, not typed decision
-- `SandboxPolicy.shellAllowlist` — no workspace-level shell restriction
-- `SandboxPolicy.networkAllowlist` — no workspace-level network restriction
-- `ContainerSandboxConfig.networkMode: "allowlist"` — only `"none" | "host"`
-- `ContainerSandboxConfig.setupCommands` — not yet supported
+- `SandboxPolicy` — workspace-level policy with shell/network allowlists
+- `SandboxEnforcer` — per-workspace enforcement class
+- `SandboxDecision` — typed allow/deny result (currently returns boolean)
 - `MicroVMSandboxConfig` — Layer 3 not started
+
+Current implementation uses only `SandboxMode` and `ContainerSandboxConfig`. The `workspace-write` mode has no Layer 1 enforcement — see [status.md](../status.md#3-critical-gaps).

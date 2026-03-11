@@ -34,15 +34,19 @@ The industry shifted from **Context Engineering** (what info to give the model) 
 Agent Apps declare which workspace events should activate them:
 
 ```typescript
+// Design target — full trigger taxonomy
 type HarnessTrigger =
-  | { event: "file_written"; pattern?: string }       // e.g., "*.ts"
-  | { event: "file_deleted"; pattern?: string }
-  | { event: "tool_completed"; toolName: string }
-  | { event: "task_completed" }
-  | { event: "commit_created" }
-  | { event: "error_detected"; source?: string }
-  | { event: "schedule"; cron: string }
-  | { event: "manual" }                               // user clicks "Run"
+  | { event: "file_written"; pattern?: string }       // ✅ implemented
+  | { event: "file_deleted"; pattern?: string }       // ❌ not yet
+  | { event: "tool_completed"; toolName: string }     // ✅ implemented
+  | { event: "task_completed" }                       // ✅ implemented
+  | { event: "commit_created" }                       // ❌ not yet
+  | { event: "error_detected"; source?: string }      // ❌ not yet
+  | { event: "schedule"; cron: string }               // ❌ not yet
+  | { event: "manual" }                               // ❌ not yet
+
+// Actual implementation (src/types/index.ts) — only 3 events:
+type HarnessTrigger = { event: "file_written" | "tool_completed" | "task_completed"; pattern?: string; toolName?: string }
 ```
 
 **Currently implemented**: `file_written`, `tool_completed`, `task_completed` (3 of 8).
@@ -81,34 +85,35 @@ Workspace: "my-react-app"
 
   Agent Apps:
     - name: "ESLint"                                    # [V] Verify
-      kind: autonomous
-      source: native
+      kind: native
+      nativeComponent: eslint-app
       harness:
         triggers: [{ event: "file_written", pattern: "*.{ts,tsx}" }]
         feedbackToAgent: true
 
     - name: "TypeScript Checker"                        # [V] Verify
-      kind: autonomous
-      source: native
+      kind: native
+      nativeComponent: tsc-app
       harness:
         triggers: [{ event: "file_written", pattern: "*.{ts,tsx}" }]
         feedbackToAgent: true
 
     - name: "GitHub"                                    # [I] Inform
-      kind: tool-provider
-      source: mcp (server-github)
+      kind: custom
+      mcpDependencies: [server-github]
       toolExposure: namespaced
 
     - name: "Test Runner"                               # [V] Verify + [X] Correct
-      kind: autonomous
-      source: native
+      kind: native
+      nativeComponent: test-runner-app
       harness:
         triggers: [{ event: "task_completed" }]
         feedbackToAgent: true
 
     - name: "PR Dashboard"                              # [I] Inform
-      kind: viewer
-      source: mcp (server-github, ui:// resource)
+      kind: custom
+      mcpDependencies: [server-github]
+      capabilities.ui: { renderer: { type: "mcp-app" } }
 ```
 
 In this setup:

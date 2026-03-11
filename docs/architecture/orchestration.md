@@ -22,9 +22,9 @@ Majordomo (global orchestrator)
   │     │     └── Sub-Agent Team (parallel via Promise.all)
   │     │
   │     ├── FlexibleWorkspace
-  │     │     ├── Pane: Agent App "GitHub PR"    (tool-provider, MCP)
-  │     │     ├── Pane: Agent App "Linter"       (autonomous, native)
-  │     │     └── Pane: Agent App "Test Runner"  (autonomous, script)
+  │     │     ├── Pane: Agent App "GitHub PR"    (custom, MCP)
+  │     │     ├── Pane: Agent App "Linter"       (native)
+  │     │     └── Pane: Agent App "Test Runner"  (native)
   │     │
   │     ├── MCP Dependencies (Tier 1 — tool-only, no manifest)
   │     └── App Registry (per-workspace)
@@ -38,6 +38,11 @@ All tool execution — orchestrator, Agent Apps, sub-agents — goes through the
 ---
 
 ## Communication Protocols
+
+> **Implementation note**: The protocol messages below describe the *target architecture*.
+> The current implementation uses the event bus with different event names:
+> `task:dispatch`, `task:status`, `task:result`, `file:written`, `tool:completed`, `harness:feedback`, `workspace:deleted`.
+> These will be aligned as the Agent App system matures.
 
 ### Orchestrator ↔ Agent App
 
@@ -60,23 +65,23 @@ All tool execution — orchestrator, Agent Apps, sub-agents — goes through the
 
 **Downward (Orchestrator → Agent App)**:
 
-| Message | Description | Kinds |
-|---------|-------------|-------|
-| `app:invoke_tool` | Call one of the app's tools | tool-provider, autonomous |
-| `app:dispatch_task` | Send a task for autonomous execution | autonomous |
-| `app:context_update` | Push workspace context (file changes, results) | autonomous, viewer |
-| `app:configure` | Update runtime configuration | all |
-| `app:shutdown` | Graceful shutdown | all |
+| Message | Description | Applicable To |
+|---------|-------------|---------------|
+| `app:invoke_tool` | Call one of the app's tools | Apps with tools |
+| `app:dispatch_task` | Send a task for autonomous execution | Apps with `acceptsTasks` |
+| `app:context_update` | Push workspace context (file changes, results) | Apps with tasks or UI |
+| `app:configure` | Update runtime configuration | All |
+| `app:shutdown` | Graceful shutdown | All |
 
 **Upward (Agent App → Orchestrator)**:
 
-| Message | Description | Kinds |
-|---------|-------------|-------|
-| `agent:report_result` | Return tool result or task completion | tool-provider, autonomous |
-| `agent:request_context` | Ask for workspace context | autonomous |
-| `agent:request_tool` | Ask orchestrator to call a workspace tool (subject to sandbox) | autonomous |
-| `agent:emit_event` | Emit to workspace event bus | autonomous, tool-provider |
-| `agent:request_ui_update` | Ask pane to re-render | all with UI |
+| Message | Description | Applicable To |
+|---------|-------------|---------------|
+| `agent:report_result` | Return tool result or task completion | Apps with tools or tasks |
+| `agent:request_context` | Ask for workspace context | Apps with `acceptsTasks` |
+| `agent:request_tool` | Ask orchestrator to call a workspace tool (subject to sandbox) | Apps with `acceptsTasks` |
+| `agent:emit_event` | Emit to workspace event bus | Apps with tools |
+| `agent:request_ui_update` | Ask pane to re-render | Apps with UI |
 
 **Downward (Majordomo → Orchestrator)**:
 
@@ -127,9 +132,9 @@ Why no direct P2P:
 
 | Existing Concept | Evolution |
 |-----------------|-----------|
-| `WorkspaceAgent` | Becomes the orchestrator Agent App. Same class, modeled with implicit manifest |
+| `WorkspaceAgent` | Separate class with `generateOrchestratorManifest()`. Not yet unified as an Agent App (see [design-divergences](../decisions/design-divergences.md#divergence-3)) |
 | `PaneType: "agent" \| "file"` | Extended to `"agent" \| "file" \| "agent-app"` |
-| `spawn_sub_agent` | An Agent App with `kind: "autonomous"` is a persistent, visible version of a sub-agent |
+| `spawn_sub_agent` | Ephemeral via workspace tools. Persistent Agent Apps are the visible counterpart |
 | Built-in tools | Belong to the orchestrator's tool set. All pass through `SandboxEnforcer` |
 | MCP server | Imported as Agent App via MCP adapter |
 | Skills | A Skill is a "headless Agent App" — system prompt + tool subset with no UI |

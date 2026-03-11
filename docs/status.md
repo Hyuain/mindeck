@@ -73,11 +73,11 @@ The design's most security-critical component is absent. `workspace-write` mode 
 
 ### Gap 2 (Medium): Orchestrator Is Not an Agent App
 
-WorkspaceAgent is separate from the Agent App system. No `kind: "orchestrator"`, no auto-generated manifest. This means no unified type system and no uniform sandbox enforcement path.
+WorkspaceAgent is separate from the Agent App system. Has `generateOrchestratorManifest()` but not modeled as a true Agent App. This means no unified type system and no uniform sandbox enforcement path.
 
 ### Gap 3 (Medium): AgentAppManifest Diverged from Design
 
-`kind` field removed (behavior inferred from capabilities). `source` union replaced with flat `mcpDependencies` + `nativeComponent` fields. Simpler but loses explicit categorization.
+`kind` field redefined (`"system" | "native" | "custom"` instead of behavioral four-kind system). `source` union replaced with flat `mcpDependencies` + `nativeComponent` fields. Simpler but loses explicit behavioral categorization.
 
 ### Gap 4 (Low): System Prompt Sandbox Integration Incomplete
 

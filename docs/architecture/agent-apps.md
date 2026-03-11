@@ -41,31 +41,31 @@ Why this matters:
 Every Agent App is defined by a manifest — the contract between Mindeck and the app.
 
 ```typescript
+// Actual implementation (src/types/index.ts)
 interface AgentAppManifest {
   // Identity
-  id: string                    // UUID or namespaced ("mcp:github", "native:linter")
+  id: string
   name: string
   version: string
   description: string
   icon?: string                 // Lucide icon name or data URI
-  author?: string
 
-  // Kind — determines lifecycle, resource consumption, interaction model
-  kind: "orchestrator" | "tool-provider" | "autonomous" | "viewer"
+  // Kind — simplified from design spec's four-kind system
+  kind: "system" | "native" | "custom"
 
-  // Source — where this app comes from
-  source:
-    | { type: "mcp"; config: MCPSourceConfig }
-    | { type: "native"; component: string }
-    | { type: "script"; entryPoint: string; runtime: "deno" | "node" }
-    | { type: "remote"; url: string }
+  // Source — flat optional fields (diverged from discriminated union design)
+  mcpDependencies?: MCPSourceConfig[]
+  nativeComponent?: string
 
   // What this app can do
   capabilities: {
-    tools?: AgentAppToolDef[]       // Tools exposed to workspace
-    ui?: { renderer: UIRenderer; minWidth?: number; minHeight?: number }
-    acceptsTasks?: boolean          // Can receive tasks from orchestrator
-    emitsEvents?: boolean           // Can emit to workspace event bus
+    tools?: ToolDefinition[]
+    ui?: {
+      renderer: { type: "mcp-app"; resourceUri: string }
+               | { type: "native"; component: string }
+      minWidth?: number
+    }
+    acceptsTasks?: boolean
   }
 
   // How tools appear in the main agent's tool list
@@ -74,64 +74,64 @@ interface AgentAppManifest {
   // What the app is allowed to do
   permissions: {
     filesystem: "none" | "read" | "workspace-only" | "full"
-    network: "none" | "same-origin" | "full"
+    network: "none" | "full"
     shell: boolean
-    invokeOtherApps: boolean
   }
 
   // When/how the app runs
   lifecycle: {
     startup: "eager" | "lazy" | "on-trigger"
     persistence: "session" | "workspace" | "global"
-    healthCheckInterval?: number
   }
 
   // Harness participation — see harness-engine.md
   harness?: {
-    triggers?: HarnessTrigger[]
+    triggers: HarnessTrigger[]
     feedbackToAgent: boolean
   }
 }
 ```
 
+> **Note**: The implementation diverges from the original design spec in several ways.
+> See [design-divergences.md](../decisions/design-divergences.md) for details.
+
 ---
 
-## Four Kinds
+## Three Kinds (Implementation)
+
+The original design spec proposed four kinds (`orchestrator`, `tool-provider`, `autonomous`, `viewer`). The implementation uses three simpler categories:
 
 ```
-┌──────────────┬─────────────────┬───────────────────┬────────────────┐
-│ orchestrator │  tool-provider  │    autonomous     │    viewer      │
-│ (internal)   │                 │                   │                │
-├──────────────┼─────────────────┼───────────────────┼────────────────┤
-│ THE conductor│ Passive         │ Active            │ Display-only   │
-│ 1 per WS     │ Main agent      │ Has own agentic   │ No LLM/tools   │
-│              │ calls its tools │ loop + tools      │ Renders data   │
-│              │                 │                   │                │
-│ Examples:    │ Examples:       │ Examples:         │ Examples:      │
-│ WorkspaceAgent│ MCP GitHub     │ Code reviewer     │ Log viewer     │
-│              │ DB connector    │ Test runner       │ Metrics dash   │
-│              │ Search API      │ Security scanner  │ PR diff viewer │
-│              │                 │                   │                │
-│ LLM: yes     │ LLM cost: 0    │ LLM: per-run     │ LLM cost: 0   │
-│ UI: chat     │ UI: optional    │ UI: chat/output   │ UI: always     │
-│ Start: eager │ Start: eager    │ Start: trigger    │ Start: lazy    │
-│ Sandbox: YES │ Sandbox: YES    │ Sandbox: YES      │ Sandbox: N/A   │
-└──────────────┴─────────────────┴───────────────────┴────────────────┘
+┌──────────────┬─────────────────┬───────────────────┐
+│   system     │     native      │     custom        │
+├──────────────┼─────────────────┼───────────────────┤
+│ Built-in     │ Mindeck-native  │ User-defined      │
+│ core apps    │ components      │ or MCP-imported   │
+│              │                 │                   │
+│ Examples:    │ Examples:       │ Examples:         │
+│ (reserved)   │ ESLint App      │ MCP GitHub        │
+│              │ TSC App         │ Custom script     │
+│              │ Test Runner     │ DB connector      │
+└──────────────┴─────────────────┴───────────────────┘
 ```
 
-### The Orchestrator Kind
+> **Design divergence**: The four-kind system from the design spec was simplified.
+> Behavior is inferred from capabilities at runtime rather than from an explicit `kind` discriminator.
+> See [design-divergences.md](../decisions/design-divergences.md#divergence-1).
 
-The orchestrator is the workspace's Main Agent modeled as a special Agent App. This unifies the type system — everything that runs tools is an Agent App.
+### The Orchestrator (Separate from Agent App System)
 
-| Property | Orchestrator | Other Agent Apps |
-|----------|-------------|-----------------|
+The WorkspaceAgent is **not** modeled as an Agent App in the current implementation. It is a separate class with its own ad-hoc sandbox logic. This is the largest architectural divergence from the design spec.
+
+| Property | WorkspaceAgent | Agent Apps |
+|----------|---------------|-----------|
 | Quantity | Exactly 1 per workspace (singleton) | 0 to N |
 | Removable | No — always present | Yes |
-| Manifest | Auto-generated from workspace config | User-defined or MCP-generated |
+| Manifest | `generateOrchestratorManifest()` (runtime, not stored) | User-defined or MCP-generated |
 | Orchestration | Dispatches tasks, spawns sub-agents, manages apps | Can only request tools from main agent |
 | Harness role | Receives all harness feedback | Produces harness feedback |
-| Tools | builtins + MCP deps + all agent-app tools | Only its own tools |
-| Sandbox | Workspace sandbox policy (floor) | min(app permissions, workspace sandbox) |
+| Tools | builtins + MCP deps + all agent-app tools + workspace tools | Only its own tools |
+| Sandbox | Workspace sandbox policy (separate enforcement path) | min(app permissions, workspace sandbox) |
 
 ---
 
