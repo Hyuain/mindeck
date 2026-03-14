@@ -1,3 +1,4 @@
+use crate::error::AppError;
 use serde::Serialize;
 use std::process::Command;
 use tauri::command;
@@ -14,7 +15,7 @@ pub struct BashOutput {
 /// Execute a shell command and return stdout/stderr/exit_code.
 /// The frontend must show a confirmation dialog before calling this command.
 #[command]
-pub async fn bash_exec(command: String, cwd: Option<String>) -> Result<BashOutput, String> {
+pub async fn bash_exec(command: String, cwd: Option<String>) -> Result<BashOutput, AppError> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut cmd = Command::new("sh");
         cmd.arg("-c").arg(&command);
@@ -23,9 +24,7 @@ pub async fn bash_exec(command: String, cwd: Option<String>) -> Result<BashOutpu
             cmd.current_dir(&dir);
         }
 
-        let output = cmd
-            .output()
-            .map_err(|e| format!("Failed to execute command: {e}"))?;
+        let output = cmd.output().map_err(AppError::Io)?;
 
         Ok(BashOutput {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
@@ -34,7 +33,7 @@ pub async fn bash_exec(command: String, cwd: Option<String>) -> Result<BashOutpu
         })
     })
     .await
-    .map_err(|e| format!("Task join error: {e}"))?
+    .map_err(|e| AppError::Other(format!("Task join error: {e}")))?
 }
 
 /// Streaming variant: emits lines of stdout/stderr through a Channel.
@@ -52,7 +51,7 @@ pub async fn bash_exec_stream(
     command: String,
     cwd: Option<String>,
     on_event: Channel<BashChunkEvent>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::{BufRead, BufReader};
         use std::process::Stdio;
@@ -69,10 +68,25 @@ pub async fn bash_exec_stream(
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| format!("Failed to spawn process: {e}"))?;
+            .map_err(|e| AppError::Other(format!("Failed to spawn process: {e}")))?;
 
-        // Read stdout line by line and emit events
-        if let Some(stdout) = child.stdout.take() {
+        let stderr_handle = child.stderr.take();
+        let stdout_handle = child.stdout.take();
+
+        // Spawn a thread to drain stderr concurrently to avoid pipe buffer deadlock
+        let on_event_clone = on_event.clone();
+        let stderr_thread = std::thread::spawn(move || {
+            if let Some(stderr) = stderr_handle {
+                for line in BufReader::new(stderr).lines() {
+                    if let Ok(data) = line {
+                        on_event_clone.send(BashChunkEvent::Stderr { data }).ok();
+                    }
+                }
+            }
+        });
+
+        // Read stdout on the current thread
+        if let Some(stdout) = stdout_handle {
             for line in BufReader::new(stdout).lines() {
                 match line {
                     Ok(data) => {
@@ -89,14 +103,8 @@ pub async fn bash_exec_stream(
             }
         }
 
-        // Read stderr after stdout completes
-        if let Some(stderr) = child.stderr.take() {
-            for line in BufReader::new(stderr).lines() {
-                if let Ok(data) = line {
-                    on_event.send(BashChunkEvent::Stderr { data }).ok();
-                }
-            }
-        }
+        // Wait for the stderr thread to finish
+        let _ = stderr_thread.join();
 
         let exit_code = child
             .wait()
@@ -107,5 +115,5 @@ pub async fn bash_exec_stream(
         Ok(())
     })
     .await
-    .map_err(|e| format!("Task join error: {e}"))?
+    .map_err(|e| AppError::Other(format!("Task join error: {e}")))?
 }

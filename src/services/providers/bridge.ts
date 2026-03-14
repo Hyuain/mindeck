@@ -125,7 +125,12 @@ function formatHistoryAnthropic(messages: AgentMessage[]): unknown[] {
         const content: unknown[] = []
         if (msg.content) content.push({ type: "text", text: msg.content })
         for (const tc of msg.toolCalls) {
-          content.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.arguments })
+          content.push({
+            type: "tool_use",
+            id: tc.id,
+            name: tc.name,
+            input: tc.arguments,
+          })
         }
         result.push({ role: "assistant", content })
       } else {
@@ -138,14 +143,11 @@ function formatHistoryAnthropic(messages: AgentMessage[]): unknown[] {
   return result
 }
 
-function formatMessages(
-  messages: AgentMessage[],
-  providerType: string,
-): unknown[] {
+function formatMessages(messages: AgentMessage[], providerType: string): unknown[] {
   const hasToolMessages = messages.some(
     (m) =>
       m.role === "tool" ||
-      (m.role === "assistant" && (m as { toolCalls?: ToolCall[] }).toolCalls?.length),
+      (m.role === "assistant" && (m as { toolCalls?: ToolCall[] }).toolCalls?.length)
   )
 
   if (!hasToolMessages) {
@@ -182,7 +184,7 @@ export async function* streamChat(
   modelId: string,
   messages: AgentMessage[],
   tools?: ToolDefinition[],
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): AsyncIterable<ExtendedChatChunk> {
   const queue: Array<ExtendedChatChunk | Error> = []
   let notify: (() => void) | null = null
@@ -211,7 +213,11 @@ export async function* streamChat(
     } else if (event.type === "toolCallStart") {
       push({ delta: "", done: false, toolCallStart: { id: event.id, name: event.name } })
     } else if (event.type === "toolCallArgsDelta") {
-      push({ delta: "", done: false, toolCallArgsDelta: { id: event.id, delta: event.delta } })
+      push({
+        delta: "",
+        done: false,
+        toolCallArgsDelta: { id: event.id, delta: event.delta },
+      })
     } else if (event.type === "toolCallEnd") {
       push({ delta: "", done: false, toolCallEnd: { id: event.id } })
     }
@@ -261,9 +267,13 @@ export async function probeProvider(providerId: string): Promise<HealthStatus> {
 export async function probeUrl(
   providerType: string,
   baseUrl: string,
-  apiKey: string,
+  keychainAlias?: string
 ): Promise<HealthStatus> {
-  const result = await invoke<ProbeResult>("probe_url", { providerType, baseUrl, apiKey })
+  const result = await invoke<ProbeResult>("probe_url", {
+    providerType,
+    baseUrl,
+    keychainAlias: keychainAlias ?? null,
+  })
   if (result.status === "connected") {
     return { status: "connected", latencyMs: result.latencyMs ?? 0 }
   }

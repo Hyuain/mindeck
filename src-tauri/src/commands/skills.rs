@@ -1,8 +1,8 @@
 use crate::error::AppError;
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -34,47 +34,9 @@ fn skill_path(dir: &PathBuf, id: &str) -> PathBuf {
     dir.join(format!("{id}.json"))
 }
 
-/// Get the current time as an ISO 8601 UTC timestamp string.
-/// Uses the Gregorian calendar algorithm without external dependencies.
+/// Get the current local time as an ISO 8601 timestamp string.
 fn now_timestamp() -> String {
-    let total_secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let time_secs = total_secs % 86400;
-    let h = time_secs / 3600;
-    let min = (time_secs % 3600) / 60;
-    let s = time_secs % 60;
-
-    // Convert days since 1970-01-01 to year/month/day (Gregorian)
-    let mut remaining_days = total_secs / 86400;
-    let mut year = 1970u32;
-    loop {
-        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
-        if remaining_days < days_in_year {
-            break;
-        }
-        remaining_days -= days_in_year;
-        year += 1;
-    }
-    let leap = is_leap_year(year);
-    let month_lengths: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut month = 1u32;
-    for &ml in &month_lengths {
-        if remaining_days < ml {
-            break;
-        }
-        remaining_days -= ml;
-        month += 1;
-    }
-    let day = remaining_days + 1;
-
-    format!("{year:04}-{month:02}-{day:02}T{h:02}:{min:02}:{s:02}Z")
-}
-
-fn is_leap_year(year: u32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 fn slugify(s: &str) -> String {
     let slug: String = s

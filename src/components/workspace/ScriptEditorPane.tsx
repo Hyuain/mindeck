@@ -66,7 +66,8 @@ export function ScriptEditorPane() {
     setSelectedPath(path)
     setDirty(false)
     try {
-      const text = await invoke<string>("read_script", { path })
+      const filename = path.split("/").pop() ?? path
+      const text = await invoke<string>("read_script", { filename })
       setContent(text)
     } catch (err) {
       log.warn("Failed to read script", err)
@@ -77,7 +78,8 @@ export function ScriptEditorPane() {
   async function handleSave() {
     if (!selectedPath) return
     try {
-      await invoke("write_script", { path: selectedPath, content })
+      const filename = selectedPath.split("/").pop() ?? selectedPath
+      await invoke("write_script", { filename, content })
       setDirty(false)
       addLog(`Saved: ${selectedPath.split("/").pop()}`)
     } catch (err) {
@@ -90,7 +92,7 @@ export function ScriptEditorPane() {
       const home = await homeDir()
       const name = `script-${Date.now()}.ts`
       const path = `${home}/.mindeck/scripts/${name}`
-      await invoke("write_script", { path, content: SCRIPT_TEMPLATE })
+      await invoke("write_script", { filename: name, content: SCRIPT_TEMPLATE })
       await loadScripts()
       setSelectedPath(path)
       setContent(SCRIPT_TEMPLATE)
@@ -103,12 +105,11 @@ export function ScriptEditorPane() {
 
   async function handleDelete() {
     if (!selectedPath) return
-    const confirmed = window.confirm(
-      `Delete ${selectedPath.split("/").pop()}?`
-    )
+    const confirmed = window.confirm(`Delete ${selectedPath.split("/").pop()}?`)
     if (!confirmed) return
     try {
-      await invoke("delete_script", { path: selectedPath })
+      const filename = selectedPath.split("/").pop() ?? selectedPath
+      await invoke("delete_script", { filename })
       addLog(`Deleted: ${selectedPath.split("/").pop()}`)
       setSelectedPath(null)
       setContent("")

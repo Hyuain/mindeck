@@ -1,14 +1,15 @@
+use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{command, State};
 
 // ─── Managed state ───────────────────────────────────────────
 
 pub struct McpProcessRegistry {
-    pub processes: Mutex<HashMap<String, McpProcess>>,
+    pub processes: Mutex<HashMap<String, Arc<Mutex<McpProcess>>>>,
 }
 
 impl McpProcessRegistry {
@@ -53,7 +54,7 @@ fn send_request(
     proc: &mut McpProcess,
     method: &str,
     params: serde_json::Value,
-) -> Result<u64, String> {
+) -> Result<u64, AppError> {
     let id = proc.next_id;
     proc.next_id += 1;
     let req = JsonRpcRequest {
@@ -62,24 +63,22 @@ fn send_request(
         method,
         params,
     };
-    let mut line =
-        serde_json::to_string(&req).map_err(|e| format!("Serialize error: {e}"))?;
+    let mut line = serde_json::to_string(&req)?;
     line.push('\n');
     proc.stdin
         .write_all(line.as_bytes())
-        .map_err(|e| format!("Write to MCP stdin failed: {e}"))?;
+        .map_err(|e| AppError::Other(format!("Write to MCP stdin failed: {e}")))?;
     Ok(id)
 }
 
-fn read_response(proc: &mut McpProcess) -> Result<serde_json::Value, String> {
+fn read_response(proc: &mut McpProcess) -> Result<serde_json::Value, AppError> {
     let mut line = String::new();
     proc.stdout
         .read_line(&mut line)
-        .map_err(|e| format!("Read from MCP stdout failed: {e}"))?;
-    let resp: JsonRpcResponse =
-        serde_json::from_str(line.trim()).map_err(|e| format!("Parse MCP response: {e}"))?;
+        .map_err(|e| AppError::Other(format!("Read from MCP stdout failed: {e}")))?;
+    let resp: JsonRpcResponse = serde_json::from_str(line.trim())?;
     if let Some(err) = resp.error {
-        return Err(format!("MCP error: {}", err.message));
+        return Err(AppError::Other(format!("MCP error: {}", err.message)));
     }
     Ok(resp.result.unwrap_or(serde_json::Value::Null))
 }
@@ -95,11 +94,11 @@ pub fn mcp_start(
     command: String,
     args: Vec<String>,
     env: HashMap<String, String>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let mut lock = state
         .processes
         .lock()
-        .map_err(|e| format!("Registry lock error: {e}"))?;
+        .map_err(|e| AppError::Other(format!("Registry lock error: {e}")))?;
 
     if lock.contains_key(&id) {
         return Ok(()); // already running
@@ -112,16 +111,16 @@ pub fn mcp_start(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|e| format!("Failed to spawn MCP process '{command}': {e}"))?;
+        .map_err(|e| AppError::Other(format!("Failed to spawn MCP process '{command}': {e}")))?;
 
     let stdin = child
         .stdin
         .take()
-        .ok_or_else(|| "Failed to open MCP stdin".to_string())?;
+        .ok_or_else(|| AppError::Other("Failed to open MCP stdin".into()))?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| "Failed to open MCP stdout".to_string())?;
+        .ok_or_else(|| AppError::Other("Failed to open MCP stdout".into()))?;
 
     let mut proc = McpProcess {
         _child: child,
@@ -145,36 +144,47 @@ pub fn mcp_start(
         "method": "notifications/initialized",
         "params": {}
     });
-    let mut line =
-        serde_json::to_string(&notif).map_err(|e| format!("Serialize error: {e}"))?;
+    let mut line = serde_json::to_string(&notif)?;
     line.push('\n');
     proc.stdin
         .write_all(line.as_bytes())
-        .map_err(|e| format!("Failed to write initialized notification: {e}"))?;
+        .map_err(|e| AppError::Other(format!("Failed to write initialized notification: {e}")))?;
 
-    lock.insert(id, proc);
+    lock.insert(id, Arc::new(Mutex::new(proc)));
     Ok(())
 }
 
 /// Invoke a JSON-RPC method on a running MCP process.
+/// Acquires the outer HashMap lock briefly to clone the Arc, then releases it
+/// before doing blocking I/O on the per-process Mutex.
 #[command]
 pub fn mcp_invoke(
     state: State<'_, McpProcessRegistry>,
     id: String,
     method: String,
     params: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    let mut lock = state
-        .processes
+) -> Result<serde_json::Value, AppError> {
+    // Brief lock on the registry — clone the Arc so we can release immediately
+    let proc_arc = {
+        let lock = state
+            .processes
+            .lock()
+            .map_err(|e| AppError::Other(format!("Registry lock error: {e}")))?;
+
+        Arc::clone(
+            lock.get(&id)
+                .ok_or_else(|| AppError::Other(format!(
+                    "MCP process '{id}' not found — call mcp_start first"
+                )))?,
+        )
+    };
+    // Outer lock is now released — blocking I/O only holds the per-process lock
+    let mut proc = proc_arc
         .lock()
-        .map_err(|e| format!("Registry lock error: {e}"))?;
+        .map_err(|e| AppError::Other(format!("Process lock error: {e}")))?;
 
-    let proc = lock
-        .get_mut(&id)
-        .ok_or_else(|| format!("MCP process '{id}' not found — call mcp_start first"))?;
-
-    send_request(proc, &method, params)?;
-    read_response(proc)
+    send_request(&mut proc, &method, params)?;
+    read_response(&mut proc)
 }
 
 /// Kill an MCP server process and remove it from the registry.
@@ -182,11 +192,11 @@ pub fn mcp_invoke(
 pub fn mcp_stop(
     state: State<'_, McpProcessRegistry>,
     id: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let mut lock = state
         .processes
         .lock()
-        .map_err(|e| format!("Registry lock error: {e}"))?;
+        .map_err(|e| AppError::Other(format!("Registry lock error: {e}")))?;
     lock.remove(&id); // Child drop → OS sends SIGCHLD
     Ok(())
 }

@@ -655,15 +655,21 @@ pub async fn list_provider_models(provider_id: String) -> Result<Vec<ModelInfo>,
 }
 
 /// Validate a provider connection using raw parameters.
+/// Accepts an optional keychain alias instead of a raw API key.
 #[tauri::command]
 pub async fn probe_url(
     provider_type: String,
     base_url: String,
-    api_key: String,
+    keychain_alias: Option<String>,
 ) -> Result<ProbeResult, AppError> {
     let client = build_client()?;
     let base = base_url.trim_end_matches('/');
     let start = std::time::Instant::now();
+
+    let api_key = match keychain_alias {
+        Some(alias) if !alias.is_empty() => get_api_key(&alias).unwrap_or_default(),
+        _ => String::new(),
+    };
 
     let result = match provider_type.as_str() {
         "ollama" => client.get(format!("{base}/api/tags")).send().await,

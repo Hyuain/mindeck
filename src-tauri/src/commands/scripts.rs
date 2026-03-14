@@ -8,6 +8,22 @@ fn scripts_dir() -> Result<std::path::PathBuf, AppError> {
     Ok(dir)
 }
 
+/// Sanitize a filename: reject path separators and traversal components.
+fn safe_filename(name: &str) -> Result<&str, AppError> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name == "."
+        || name == ".."
+        || name.contains('\0')
+    {
+        return Err(AppError::Other(format!(
+            "Invalid script filename: '{name}'"
+        )));
+    }
+    Ok(name)
+}
+
 /// List all *.ts files in ~/.mindeck/scripts/.
 #[tauri::command]
 pub async fn list_scripts() -> Result<Vec<String>, AppError> {
@@ -27,35 +43,37 @@ pub async fn list_scripts() -> Result<Vec<String>, AppError> {
     .map_err(|e| AppError::Other(format!("Task join error: {e}")))?
 }
 
-/// Read the content of a script file.
+/// Read the content of a script file by filename (not full path).
 #[tauri::command]
-pub async fn read_script(path: String) -> Result<String, AppError> {
+pub async fn read_script(filename: String) -> Result<String, AppError> {
     tauri::async_runtime::spawn_blocking(move || {
-        std::fs::read_to_string(&path).map_err(|e| AppError::Other(e.to_string()))
+        let name = safe_filename(&filename)?;
+        let path = scripts_dir()?.join(name);
+        std::fs::read_to_string(&path).map_err(AppError::Io)
     })
     .await
     .map_err(|e| AppError::Other(format!("Task join error: {e}")))?
 }
 
-/// Write content to a script file (creates if not exists).
+/// Write content to a script file by filename (creates if not exists).
 #[tauri::command]
-pub async fn write_script(path: String, content: String) -> Result<(), AppError> {
+pub async fn write_script(filename: String, content: String) -> Result<(), AppError> {
     tauri::async_runtime::spawn_blocking(move || {
-        // Ensure parent directory exists
-        if let Some(parent) = std::path::Path::new(&path).parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, &content).map_err(|e| AppError::Other(e.to_string()))
+        let name = safe_filename(&filename)?;
+        let path = scripts_dir()?.join(name);
+        std::fs::write(&path, &content).map_err(AppError::Io)
     })
     .await
     .map_err(|e| AppError::Other(format!("Task join error: {e}")))?
 }
 
-/// Delete a script file.
+/// Delete a script file by filename.
 #[tauri::command]
-pub async fn delete_script(path: String) -> Result<(), AppError> {
+pub async fn delete_script(filename: String) -> Result<(), AppError> {
     tauri::async_runtime::spawn_blocking(move || {
-        std::fs::remove_file(&path).map_err(|e| AppError::Other(e.to_string()))
+        let name = safe_filename(&filename)?;
+        let path = scripts_dir()?.join(name);
+        std::fs::remove_file(&path).map_err(AppError::Io)
     })
     .await
     .map_err(|e| AppError::Other(format!("Task join error: {e}")))?

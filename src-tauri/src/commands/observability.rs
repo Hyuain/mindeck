@@ -1,46 +1,10 @@
 use crate::error::AppError;
+use chrono::Local;
 use serde_json::Value;
 use std::io::Write;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 fn today_date_string() -> String {
-    // Compute YYYY-MM-DD from seconds since epoch (UTC)
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days_since_epoch = secs / 86400;
-    // Use a fixed epoch offset (2000-01-01 = day 10957 since 1970-01-01)
-    let y2k_days: u64 = 10957;
-    let days_from_y2k = days_since_epoch.saturating_sub(y2k_days);
-    // Simple Gregorian calc
-    let mut year = 2000u64;
-    let mut remaining = days_from_y2k;
-    loop {
-        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-        let days_in_year: u64 = if leap { 366 } else { 365 };
-        if remaining < days_in_year {
-            break;
-        }
-        remaining -= days_in_year;
-        year += 1;
-    }
-    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-    let month_days: [u64; 12] = if leap {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    let mut month = 1u64;
-    for &md in &month_days {
-        if remaining < md {
-            break;
-        }
-        remaining -= md;
-        month += 1;
-    }
-    let day = remaining + 1;
-    format!("{year:04}-{month:02}-{day:02}")
+    Local::now().format("%Y-%m-%d").to_string()
 }
 
 fn metrics_log_path() -> Result<std::path::PathBuf, AppError> {

@@ -104,7 +104,16 @@ function AddProviderForm({ onAdded }: { onAdded: () => void }) {
     setValidation(null)
     try {
       if (!preset) return
-      const result = await probeUrl(preset.type, form.baseUrl, form.apiKey)
+      const keychainAlias = `provider-${preset.id}`
+      // Store the key in keychain before probing so probe_url can look it up
+      if (form.apiKey) {
+        await setApiKey(keychainAlias, form.apiKey)
+      }
+      const result = await probeUrl(
+        preset.type,
+        form.baseUrl,
+        form.apiKey ? keychainAlias : undefined
+      )
       setValidation(result)
     } catch {
       setValidation({ status: "error", message: "Request failed" })

@@ -1,5 +1,6 @@
 mod commands;
 mod error;
+mod path_guard;
 
 use commands::mcp::McpProcessRegistry;
 

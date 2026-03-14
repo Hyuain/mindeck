@@ -30,7 +30,15 @@ pub async fn docker_start(
     tauri::async_runtime::spawn_blocking(move || {
         let mem_arg = format!("{memory_mb}m");
         let cpus_arg = cpus.to_string();
-        let mount = format!("{workspace_path}:/workspace");
+
+        // Validate workspace_path contains no colons to prevent mount injection
+        if workspace_path.contains(':') {
+            return Err(AppError::Other(
+                "workspace_path must not contain ':' characters".into(),
+            ));
+        }
+
+        let mount_src = format!("type=bind,src={workspace_path},dst=/workspace");
 
         let output = Command::new("docker")
             .args([
@@ -43,8 +51,8 @@ pub async fn docker_start(
                 &cpus_arg,
                 "--memory",
                 &mem_arg,
-                "-v",
-                &mount,
+                "--mount",
+                &mount_src,
                 "-w",
                 "/workspace",
                 &image,
