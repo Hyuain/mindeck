@@ -4,10 +4,10 @@
  */
 import { invoke } from "@tauri-apps/api/core"
 import { registerTool } from "./registry"
-import { eventBus } from "@/services/event-bus"
+import { eventBus } from "@/services/events/event-bus"
 import { createLogger } from "@/services/logger"
-import { requestPermission } from "@/services/permissions"
-import { getActiveSandbox } from "@/services/workspace-agent"
+import { requestPermission } from "@/services/security/permissions"
+import { getActiveSandbox } from "@/services/agents/workspace-agent"
 import { stripThinkingTags } from "@/services/thinking"
 
 const log = createLogger("builtins")

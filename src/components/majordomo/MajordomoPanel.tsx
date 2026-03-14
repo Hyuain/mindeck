@@ -21,17 +21,20 @@ import { useProviderStore } from "@/stores/provider"
 import { useSkillsStore } from "@/stores/skills"
 import { useLayoutStore } from "@/stores/layout"
 import { useTaskStore } from "@/stores/tasks"
-import { MAJORDOMO_WS_ID, clearMajordomoMessages } from "@/services/conversation"
-import { majordomoAgent } from "@/services/majordomo-agent"
-import { eventBus } from "@/services/event-bus"
-import { resolvePermission, resolveAllPermissions } from "@/services/permissions"
-import { retryTask } from "@/services/task-manager"
+import {
+  MAJORDOMO_WS_ID,
+  clearMajordomoMessages,
+} from "@/services/conversation/conversation"
+import { majordomoAgent } from "@/services/agents/majordomo-agent"
+import { eventBus } from "@/services/events/event-bus"
+import { resolvePermission, resolveAllPermissions } from "@/services/security/permissions"
+import { retryTask } from "@/services/events/task-manager"
 import {
   createWorkspace,
   deleteWorkspace,
   importWorkspace,
   newWorkspace,
-} from "@/services/workspace"
+} from "@/services/workspace/workspace"
 import {
   WORKSPACE_TEMPLATES,
   applyTemplate,

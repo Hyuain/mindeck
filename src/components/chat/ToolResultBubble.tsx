@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { detectInjection } from "@/services/prompt-injection"
+import { detectInjection } from "@/services/security/prompt-injection"
 import type { InjectionDetection, Message } from "@/types"
 
 interface ToolResultBubbleProps {
@@ -17,7 +17,8 @@ export function ToolResultBubble({ message, injectionWarning }: ToolResultBubble
   const [open, setOpen] = useState(false)
 
   const toolName = message.toolName ?? "tool"
-  const isError = message.content.startsWith("Error:") || message.content.startsWith("error:")
+  const isError =
+    message.content.startsWith("Error:") || message.content.startsWith("error:")
 
   // Detect injection if not pre-computed by the caller
   const warning = injectionWarning ?? detectInjection(message.content)
@@ -34,9 +35,15 @@ export function ToolResultBubble({ message, injectionWarning }: ToolResultBubble
   return (
     <div className={`tool-result-bubble${isError ? " tool-result-error" : ""}`}>
       {warning && (
-        <div className={`tool-result-injection tool-result-injection--${warning.severity}`}>
+        <div
+          className={`tool-result-injection tool-result-injection--${warning.severity}`}
+        >
           <span className="tool-result-injection-icon">
-            {warning.severity === "high" ? "⛔" : warning.severity === "medium" ? "⚠️" : "ℹ️"}
+            {warning.severity === "high"
+              ? "⛔"
+              : warning.severity === "medium"
+                ? "⚠️"
+                : "ℹ️"}
           </span>
           <span className="tool-result-injection-label">
             Injection detected ({warning.severity}):

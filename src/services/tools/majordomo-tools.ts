@@ -11,16 +11,16 @@ import {
   createWorkspace,
   updateWorkspace,
   deleteWorkspace,
-} from "@/services/workspace"
+} from "@/services/workspace/workspace"
 import {
   WORKSPACE_TEMPLATES,
   applyTemplate,
 } from "@/services/templates/workspace-templates"
-import { agentPool } from "@/services/agent-pool"
+import { agentPool } from "@/services/agents/agent-pool"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useProviderStore } from "@/stores/provider"
-import { eventBus } from "@/services/event-bus"
-import { createTask } from "@/services/task-manager"
+import { eventBus } from "@/services/events/event-bus"
+import { createTask } from "@/services/events/task-manager"
 import { createLogger } from "@/services/logger"
 import type { ToolDefinition, Workspace } from "@/types"
 

@@ -3,12 +3,12 @@ import { Eraser, X } from "lucide-react"
 import { useChatStore } from "@/stores/chat"
 import { useProviderStore } from "@/stores/provider"
 import { useWorkspaceStore } from "@/stores/workspace"
-import { loadMessages, clearMessages } from "@/services/conversation"
+import { loadMessages, clearMessages } from "@/services/conversation/conversation"
 import {
   agentPool,
   registerChatCallbacks,
   clearChatCallbacks,
-} from "@/services/agent-pool"
+} from "@/services/agents/agent-pool"
 import { ModelSelector } from "@/components/provider/ModelSelector"
 import { MessageList } from "./MessageList"
 import { ChatInput } from "./ChatInput"

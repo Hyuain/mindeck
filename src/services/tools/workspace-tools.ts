@@ -3,7 +3,7 @@
  * These tools capture workspace context (provider, model) in a closure,
  * so they are NOT registered in the global tool registry.
  */
-import { runAgentLoop } from "../agentic-loop"
+import { runAgentLoop } from "../agents/agentic-loop"
 import { getToolDefinitions } from "./registry"
 import { createLogger } from "../logger"
 import { useSkillsStore } from "@/stores/skills"

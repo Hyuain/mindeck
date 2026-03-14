@@ -1,10 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import type { Skill } from "@/types"
-import {
-  exportSkillMd,
-  exportToOpenClaw,
-  importFromOpenClaw,
-} from "./skills/import-export"
+import { exportSkillMd, exportToOpenClaw, importFromOpenClaw } from "./import-export"
 
 // Re-export adapter functions for use throughout the app
 export { exportSkillMd, exportToOpenClaw, importFromOpenClaw }

@@ -10,10 +10,14 @@
  *  - Pending digest queue (drain after each stream)
  */
 import { runAgentLoop, type AgentLoopResult } from "./agentic-loop"
-import { getToolDefinitions } from "./tools/registry"
-import { createMajordomoWorkspaceTools } from "./tools/majordomo-tools"
-import { makeMessage, appendMajordomoMessage, MAJORDOMO_WS_ID } from "./conversation"
-import { createLogger } from "./logger"
+import { getToolDefinitions } from "../tools/registry"
+import { createMajordomoWorkspaceTools } from "../tools/majordomo-tools"
+import {
+  makeMessage,
+  appendMajordomoMessage,
+  MAJORDOMO_WS_ID,
+} from "../conversation/conversation"
+import { createLogger } from "../logger"
 import { useChatStore } from "@/stores/chat"
 import { useMajordomoStore } from "@/stores/majordomo"
 import { useWorkspaceStore } from "@/stores/workspace"

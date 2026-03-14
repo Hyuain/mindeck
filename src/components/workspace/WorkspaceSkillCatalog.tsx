@@ -3,7 +3,7 @@ import { RefreshCw, Sparkles } from "lucide-react"
 import type { Skill } from "@/types"
 import { useSkillsStore } from "@/stores/skills"
 import { discoverWorkspaceSkills, loadFullSkill } from "@/services/skills/skill-discovery"
-import { resolveContentRoot } from "./WorkspacePanel"
+import { resolveContentRoot } from "@/services/workspace/content-root"
 import { useWorkspaceStore } from "@/stores/workspace"
 
 interface Props {
