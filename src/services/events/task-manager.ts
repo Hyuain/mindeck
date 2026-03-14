@@ -9,7 +9,7 @@ import { useTaskStore } from "@/stores/tasks"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { eventBus } from "./event-bus"
 import { enqueueTaskDispatch } from "./event-queue"
-import { createLogger } from "./logger"
+import { createLogger } from "../logger"
 import type { Task, TaskStatus, MessageSource } from "@/types"
 
 const log = createLogger("TaskManager")

@@ -6,8 +6,11 @@ import type {
   PermissionRequest,
   Message,
 } from "@/types"
-import { appendMajordomoMessage, MAJORDOMO_WS_ID } from "@/services/conversation"
-import { eventBus } from "@/services/event-bus"
+import {
+  appendMajordomoMessage,
+  MAJORDOMO_WS_ID,
+} from "@/services/conversation/conversation"
+import { eventBus } from "@/services/events/event-bus"
 import { useChatStore } from "@/stores/chat"
 import { createLogger } from "@/services/logger"
 

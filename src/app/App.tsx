@@ -12,14 +12,21 @@ import { useTaskStore } from "@/stores/tasks"
 import { useAgentAppsStore } from "@/stores/agent-apps"
 import { useColumnResize } from "@/hooks/useColumnResize"
 import { initAppDirs } from "@/services/providers/storage"
-import { listWorkspaces, createWorkspace, newWorkspace } from "@/services/workspace"
+import {
+  listWorkspaces,
+  createWorkspace,
+  newWorkspace,
+} from "@/services/workspace/workspace"
 import { listProviders } from "@/services/providers/storage"
-import { listSkills } from "@/services/skills"
+import { listSkills } from "@/services/skills/crud"
 import { discoverGlobalSkills, loadFullSkill } from "@/services/skills/skill-discovery"
 import { registerBuiltins } from "@/services/tools/builtins"
-import { loadMajordomoMessages, MAJORDOMO_WS_ID } from "@/services/conversation"
-import { agentPool } from "@/services/agent-pool"
-import { eventBus } from "@/services/event-bus"
+import {
+  loadMajordomoMessages,
+  MAJORDOMO_WS_ID,
+} from "@/services/conversation/conversation"
+import { agentPool } from "@/services/agents/agent-pool"
+import { eventBus } from "@/services/events/event-bus"
 import { ESLINT_APP } from "@/services/native-apps/eslint-app"
 import { TSC_APP } from "@/services/native-apps/tsc-app"
 import { TEST_RUNNER_APP } from "@/services/native-apps/test-runner-app"

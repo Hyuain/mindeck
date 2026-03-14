@@ -12,7 +12,7 @@ import {
   FolderOpen,
 } from "lucide-react"
 import type { FileNode } from "@/types"
-import { useDragState } from "@/services/dragState"
+import { useDragState } from "@/services/drag-state"
 
 function fileIcon(name: string) {
   const ext = name.split(".").pop()?.toLowerCase() ?? ""

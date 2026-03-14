@@ -6,11 +6,11 @@
  * H3.5: Per-tool execution timeout
  * H3.7: Per-iteration model routing (planning / execution / verification)
  */
-import { streamChat } from "./providers/bridge"
-import { executeTool, getToolDefinitions } from "./tools/registry"
-import { createLogger } from "./logger"
-import { estimateTokens, compactHistory } from "./context-compaction"
-import { detectInjection } from "./prompt-injection"
+import { streamChat } from "../providers/bridge"
+import { executeTool, getToolDefinitions } from "../tools/registry"
+import { createLogger } from "../logger"
+import { estimateTokens, compactHistory } from "../conversation/context-compaction"
+import { detectInjection } from "../security/prompt-injection"
 import { invoke } from "@tauri-apps/api/core"
 import type {
   AgentMessage,

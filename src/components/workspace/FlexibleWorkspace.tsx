@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, type ReactNode } from "react"
-import { useDragState, type DropPosition } from "@/services/dragState"
+import { useDragState, type DropPosition } from "@/services/drag-state"
 import { useLayoutStore, type SerializedPane } from "@/stores/layout"
 
 export type PaneType = "agent" | "file" | "agent-app"

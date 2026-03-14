@@ -3,7 +3,7 @@
  * Persists factual context across agent sessions in ~/.mindeck/workspaces/{id}/memory.md
  */
 import { invoke } from "@tauri-apps/api/core"
-import { createLogger } from "./logger"
+import { createLogger } from "../logger"
 
 const log = createLogger("WorkspaceMemory")
 
@@ -65,7 +65,7 @@ export async function compactMemory(
   modelId: string
 ): Promise<string> {
   try {
-    const { streamChat } = await import("./providers/bridge")
+    const { streamChat } = await import("../providers/bridge")
     const request = [
       {
         role: "user" as const,
@@ -74,7 +74,12 @@ export async function compactMemory(
     ]
 
     let summary = ""
-    for await (const chunk of streamChat(providerId, "openai-compatible", modelId, request)) {
+    for await (const chunk of streamChat(
+      providerId,
+      "openai-compatible",
+      modelId,
+      request
+    )) {
       if (chunk.delta) summary += chunk.delta
     }
     return summary.slice(0, MEMORY_MAX_CHARS)

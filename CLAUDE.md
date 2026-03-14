@@ -14,17 +14,20 @@ src/
   components/   agents/, chat/, majordomo/, observability/, preview/renderers/,
                 provider/, ui/, workspace/
   hooks/        useColumnResize.ts, useSlashCommand.ts
-  services/     providers/{types.ts, bridge.ts, manager.ts, models.ts, storage.ts, keychain.ts}
+  services/     agents/{workspace-agent.ts, majordomo-agent.ts, agent-runner.ts,
+                        agent-pool.ts, agentic-loop.ts}
+                events/{event-bus.ts, event-queue.ts, task-manager.ts}
+                conversation/{conversation.ts, context-compaction.ts}
+                workspace/{workspace.ts, workspace-memory.ts, content-root.ts}
+                security/{prompt-injection.ts, permissions.ts}
+                harness/{harness-engine.ts}
+                providers/{types.ts, bridge.ts, manager.ts, models.ts, storage.ts, keychain.ts}
                 tools/{registry.ts, builtins.ts, workspace-tools.ts}
-                skills/{skill-loader.ts, skill-discovery.ts, context-injector.ts,
+                skills/{crud.ts, skill-loader.ts, skill-discovery.ts, context-injector.ts,
                         import-export.ts, auto-matcher.ts}
                 mcp/{client.ts, manager.ts}
-                agent-apps/, native-apps/, sandbox/, templates/, observability/, data/
-                workspace-agent.ts, majordomo-agent.ts, agent-runner.ts, agentic-loop.ts,
-                workspace.ts, conversation.ts, event-bus.ts, event-queue.ts,
-                task-manager.ts, agent-pool.ts, skills.ts, context-compaction.ts,
-                prompt-injection.ts, permissions.ts, harness-engine.ts,
-                workspace-memory.ts, logger.ts, dragState.ts
+                agent-apps/, native-apps/, sandbox/, templates/, observability/
+                logger.ts, drag-state.ts, thinking.ts
   stores/       workspace.ts, chat.ts, provider.ts, majordomo.ts, ui.ts,
                 tasks.ts, skills.ts, layout.ts, agents.ts, agent-apps.ts
   types/        index.ts (all shared types)

@@ -12,7 +12,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { createLogger } from "@/services/logger"
 import { executeTool } from "@/services/tools/registry"
-import { eventBus } from "@/services/event-bus"
+import { eventBus } from "@/services/events/event-bus"
 import type { ScriptAgentApp, ScriptAgentAppContext } from "@/types"
 
 const log = createLogger("ScriptAdapter")
@@ -115,7 +115,7 @@ export async function connectScriptsToWorkspace(
     try {
       // Attempt dynamic import — works if Tauri has file:// access
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const mod = await import(/* @vite-ignore */ script.filePath) as any
+      const mod = (await import(/* @vite-ignore */ script.filePath)) as any
       if (typeof mod?.activate !== "function") {
         log.debug("Script has no activate() export — skipping", { name: script.name })
         continue

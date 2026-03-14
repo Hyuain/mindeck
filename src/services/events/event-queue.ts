@@ -8,7 +8,7 @@
  *          ~/.mindeck/events/{workspaceId}.processed
  */
 import { invoke } from "@tauri-apps/api/core"
-import { createLogger } from "./logger"
+import { createLogger } from "../logger"
 import type { TaskDispatchEvent } from "@/types"
 
 const log = createLogger("EventQueue")
@@ -41,7 +41,9 @@ export async function enqueueTaskDispatch(event: TaskDispatchEvent): Promise<voi
  * Load all pending (unprocessed) dispatch events for a workspace.
  * Call on WorkspaceAgent.connect() to recover missed events.
  */
-export async function loadPendingDispatches(workspaceId: string): Promise<TaskDispatchEvent[]> {
+export async function loadPendingDispatches(
+  workspaceId: string
+): Promise<TaskDispatchEvent[]> {
   const raw = await invoke<PersistedEvent[]>("load_pending_events", { workspaceId })
   const results: TaskDispatchEvent[] = []
 
@@ -62,9 +64,10 @@ export async function loadPendingDispatches(workspaceId: string): Promise<TaskDi
       sourceType: payload.sourceType as TaskDispatchEvent["sourceType"],
       targetWorkspaceId: payload.targetWorkspaceId,
       task: payload.task,
-      priority: typeof payload.priority === "string"
-        ? (payload.priority as TaskDispatchEvent["priority"])
-        : "normal",
+      priority:
+        typeof payload.priority === "string"
+          ? (payload.priority as TaskDispatchEvent["priority"])
+          : "normal",
     })
   }
 
@@ -74,6 +77,9 @@ export async function loadPendingDispatches(workspaceId: string): Promise<TaskDi
 /**
  * Mark an event as processed so it won't be recovered again.
  */
-export async function markEventProcessed(workspaceId: string, eventId: string): Promise<void> {
+export async function markEventProcessed(
+  workspaceId: string,
+  eventId: string
+): Promise<void> {
   await invoke("mark_event_processed", { workspaceId, eventId })
 }

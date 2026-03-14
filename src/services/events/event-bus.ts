@@ -12,7 +12,7 @@ import type {
   ToolCompletedEvent,
   HarnessFeedbackEvent,
 } from "@/types"
-import { createLogger } from "./logger"
+import { createLogger } from "../logger"
 
 const log = createLogger("EventBus")
 

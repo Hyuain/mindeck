@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react"
 import { X } from "lucide-react"
 import type { Skill } from "@/types"
-import { makeSkill } from "@/services/skills"
+import { makeSkill } from "@/services/skills/crud"
 
 interface Props {
   open: boolean
-  skill: Skill | null  // null = create mode
+  skill: Skill | null // null = create mode
   onSave: (skill: Skill) => void
   onClose: () => void
 }
@@ -17,7 +17,7 @@ interface FormState {
   version: string
   author: string
   license: string
-  tags: string        // comma-separated
+  tags: string // comma-separated
   allowedTools: string // comma-separated
 }
 
@@ -33,7 +33,10 @@ const EMPTY: FormState = {
 }
 
 function splitComma(s: string): string[] {
-  return s.split(",").map((t) => t.trim()).filter(Boolean)
+  return s
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
 }
 
 export function SkillEditorModal({ open, skill, onSave, onClose }: Props) {
@@ -101,21 +104,28 @@ export function SkillEditorModal({ open, skill, onSave, onClose }: Props) {
   if (!open) return null
 
   return (
-    <div className="overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="overlay open"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
       <div className="sheet skill-editor-sheet">
         <div className="sheet-head">
           <div>
             <div className="sheet-title">{skill ? "Edit skill" : "New skill"}</div>
             <div className="sheet-sub">saved to ~/.mindeck/skills/</div>
           </div>
-          <button className="x-btn" onClick={onClose}><X size={13} /></button>
+          <button className="x-btn" onClick={onClose}>
+            <X size={13} />
+          </button>
         </div>
 
         <div className="skill-editor-body">
           {/* Row 1: Name + Version */}
           <div className="skill-editor-row">
             <div className="fg" style={{ flex: 2 }}>
-              <label className="fl" htmlFor="sk-name">Name</label>
+              <label className="fl" htmlFor="sk-name">
+                Name
+              </label>
               <input
                 id="sk-name"
                 className="fi"
@@ -127,7 +137,8 @@ export function SkillEditorModal({ open, skill, onSave, onClose }: Props) {
             </div>
             <div className="fg" style={{ flex: 1 }}>
               <label className="fl" htmlFor="sk-version">
-                Version <span style={{ textTransform: "none", opacity: 0.6 }}>(optional)</span>
+                Version{" "}
+                <span style={{ textTransform: "none", opacity: 0.6 }}>(optional)</span>
               </label>
               <input
                 id="sk-version"
@@ -142,7 +153,8 @@ export function SkillEditorModal({ open, skill, onSave, onClose }: Props) {
           {/* Description */}
           <div className="fg">
             <label className="fl" htmlFor="sk-desc">
-              Description <span style={{ textTransform: "none", opacity: 0.6 }}>(optional)</span>
+              Description{" "}
+              <span style={{ textTransform: "none", opacity: 0.6 }}>(optional)</span>
             </label>
             <input
               id="sk-desc"
@@ -157,7 +169,8 @@ export function SkillEditorModal({ open, skill, onSave, onClose }: Props) {
           <div className="skill-editor-row">
             <div className="fg" style={{ flex: 1 }}>
               <label className="fl" htmlFor="sk-author">
-                Author <span style={{ textTransform: "none", opacity: 0.6 }}>(optional)</span>
+                Author{" "}
+                <span style={{ textTransform: "none", opacity: 0.6 }}>(optional)</span>
               </label>
               <input
                 id="sk-author"
@@ -169,7 +182,8 @@ export function SkillEditorModal({ open, skill, onSave, onClose }: Props) {
             </div>
             <div className="fg" style={{ flex: 1 }}>
               <label className="fl" htmlFor="sk-license">
-                License <span style={{ textTransform: "none", opacity: 0.6 }}>(optional)</span>
+                License{" "}
+                <span style={{ textTransform: "none", opacity: 0.6 }}>(optional)</span>
               </label>
               <input
                 id="sk-license"
@@ -184,7 +198,10 @@ export function SkillEditorModal({ open, skill, onSave, onClose }: Props) {
           {/* Tags */}
           <div className="fg">
             <label className="fl" htmlFor="sk-tags">
-              Tags <span style={{ textTransform: "none", opacity: 0.6 }}>(comma-separated, optional)</span>
+              Tags{" "}
+              <span style={{ textTransform: "none", opacity: 0.6 }}>
+                (comma-separated, optional)
+              </span>
             </label>
             <input
               id="sk-tags"
@@ -198,7 +215,10 @@ export function SkillEditorModal({ open, skill, onSave, onClose }: Props) {
           {/* Allowed tools */}
           <div className="fg">
             <label className="fl" htmlFor="sk-tools">
-              Allowed tools <span style={{ textTransform: "none", opacity: 0.6 }}>(comma-separated, optional — blank = all)</span>
+              Allowed tools{" "}
+              <span style={{ textTransform: "none", opacity: 0.6 }}>
+                (comma-separated, optional — blank = all)
+              </span>
             </label>
             <input
               id="sk-tools"
@@ -210,8 +230,13 @@ export function SkillEditorModal({ open, skill, onSave, onClose }: Props) {
           </div>
 
           {/* Instructions */}
-          <div className="fg" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-            <label className="fl" htmlFor="sk-prompt">Instructions</label>
+          <div
+            className="fg"
+            style={{ flex: 1, display: "flex", flexDirection: "column" }}
+          >
+            <label className="fl" htmlFor="sk-prompt">
+              Instructions
+            </label>
             <textarea
               id="sk-prompt"
               className="fi skill-editor-ta"
@@ -223,7 +248,9 @@ export function SkillEditorModal({ open, skill, onSave, onClose }: Props) {
         </div>
 
         <div className="sheet-foot">
-          <button className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn-ghost" onClick={onClose}>
+            Cancel
+          </button>
           <button className="btn-solid" onClick={handleSave} disabled={!valid}>
             {skill ? "Save changes" : "Create skill"}
           </button>

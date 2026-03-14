@@ -6,31 +6,34 @@
  * Reports results back to Majordomo via event bus.
  */
 import { runAgent, messagesToAgentHistory } from "./agent-runner"
-import { eventBus } from "./event-bus"
-import { appendMessage, makeMessage } from "./conversation"
-import { getToolDefinitions, filterByIntent } from "./tools/registry"
-import { createWorkspaceTools } from "./tools/workspace-tools"
-import { streamChat } from "./providers/bridge"
-import { createLogger } from "./logger"
-import { updateTaskStatus, recoverPendingTasks } from "./task-manager"
-import { loadPendingDispatches, markEventProcessed } from "./event-queue"
-import { setPermissionContext } from "./permissions"
-import { resolveContentRoot } from "@/components/workspace/WorkspacePanel"
-import { discoverWorkspaceSkills, loadFullSkill } from "./skills/skill-discovery"
-import { discoverContextRules, buildContextSection } from "./skills/context-injector"
-import { mcpManager } from "./mcp/manager"
-import { harnessEngine } from "./harness-engine"
-import { readWorkspaceMemory, appendToWorkspaceMemory } from "./workspace-memory"
-import { stripThinkingTags } from "./thinking"
-import { metricsCollector } from "./observability/metrics-collector"
-import { DockerSandbox } from "./sandbox/docker-sandbox"
+import { eventBus } from "../events/event-bus"
+import { appendMessage, makeMessage } from "../conversation/conversation"
+import { getToolDefinitions, filterByIntent } from "../tools/registry"
+import { createWorkspaceTools } from "../tools/workspace-tools"
+import { streamChat } from "../providers/bridge"
+import { createLogger } from "../logger"
+import { updateTaskStatus, recoverPendingTasks } from "../events/task-manager"
+import { loadPendingDispatches, markEventProcessed } from "../events/event-queue"
+import { setPermissionContext } from "../security/permissions"
+import { resolveContentRoot } from "../workspace/content-root"
+import { discoverWorkspaceSkills, loadFullSkill } from "../skills/skill-discovery"
+import { discoverContextRules, buildContextSection } from "../skills/context-injector"
+import { mcpManager } from "../mcp/manager"
+import { harnessEngine } from "../harness/harness-engine"
+import {
+  readWorkspaceMemory,
+  appendToWorkspaceMemory,
+} from "../workspace/workspace-memory"
+import { stripThinkingTags } from "../thinking"
+import { metricsCollector } from "../observability/metrics-collector"
+import { DockerSandbox } from "../sandbox/docker-sandbox"
 import {
   connectScriptsToWorkspace,
   disconnectScriptsFromWorkspace,
-} from "./agent-apps/script-adapter"
-import { ESLINT_APP } from "./native-apps/eslint-app"
-import { TSC_APP } from "./native-apps/tsc-app"
-import { TEST_RUNNER_APP } from "./native-apps/test-runner-app"
+} from "../agent-apps/script-adapter"
+import { ESLINT_APP } from "../native-apps/eslint-app"
+import { TSC_APP } from "../native-apps/tsc-app"
+import { TEST_RUNNER_APP } from "../native-apps/test-runner-app"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useAgentAppsStore } from "@/stores/agent-apps"
 import { useTaskStore } from "@/stores/tasks"
@@ -105,16 +108,16 @@ const SANDBOX_READ_ONLY_BLOCKED = new Set(["bash_exec", "write_file", "delete_pa
  */
 export const activeDockerSandboxes = new Map<
   string,
-  import("./sandbox/docker-sandbox").DockerSandbox
+  import("../sandbox/docker-sandbox").DockerSandbox
 >()
 
 /** E4.6: Active sandbox for the currently executing workspace process turn. */
-let _activeSandbox: import("./sandbox/docker-sandbox").DockerSandbox | null = null
+let _activeSandbox: import("../sandbox/docker-sandbox").DockerSandbox | null = null
 export function getActiveSandbox() {
   return _activeSandbox
 }
 export function setActiveSandbox(
-  s: import("./sandbox/docker-sandbox").DockerSandbox | null
+  s: import("../sandbox/docker-sandbox").DockerSandbox | null
 ) {
   _activeSandbox = s
 }

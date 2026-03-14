@@ -5,9 +5,9 @@
  * runs the relevant Agent Apps when their trigger conditions are met.
  * Feeds results back to the active WorkspaceAgent via injectHarnessFeedback().
  */
-import { eventBus } from "./event-bus"
-import { runNativeApp } from "./native-apps/runner"
-import { createLogger } from "./logger"
+import { eventBus } from "../events/event-bus"
+import { runNativeApp } from "../native-apps/runner"
+import { createLogger } from "../logger"
 import type { AgentAppManifest } from "@/types"
 
 const log = createLogger("HarnessEngine")
