@@ -111,15 +111,11 @@ export const activeDockerSandboxes = new Map<
   import("../sandbox/docker-sandbox").DockerSandbox
 >()
 
-/** E4.6: Active sandbox for the currently executing workspace process turn. */
-let _activeSandbox: import("../sandbox/docker-sandbox").DockerSandbox | null = null
-export function getActiveSandbox() {
-  return _activeSandbox
-}
-export function setActiveSandbox(
-  s: import("../sandbox/docker-sandbox").DockerSandbox | null
-) {
-  _activeSandbox = s
+/** Look up the active Docker sandbox for a given workspace. */
+export function getActiveSandboxForWorkspace(
+  workspaceId: string
+): import("../sandbox/docker-sandbox").DockerSandbox | undefined {
+  return activeDockerSandboxes.get(workspaceId)
 }
 
 type ToolExecutorMap = Map<
@@ -369,18 +365,17 @@ export class WorkspaceAgent {
   }
 
   private async processNext(input: QueuedInput): Promise<void> {
-    this.processing = true
-
-    try {
-      await this.process(input.content, input.source, 0, input.ephemeralSkillIds)
-    } catch (err: unknown) {
-      this.log.error("Error during processing", err)
-    } finally {
-      this.processing = false
-      const next = this.queue.shift()
-      if (next) {
-        this.processNext(next)
+    let current: QueuedInput | undefined = input
+    while (current) {
+      this.processing = true
+      try {
+        await this.process(current.content, current.source, 0, current.ephemeralSkillIds)
+      } catch (err: unknown) {
+        this.log.error("Error during processing", err)
+      } finally {
+        this.processing = false
       }
+      current = this.queue.shift()
     }
   }
 
@@ -478,8 +473,6 @@ export class WorkspaceAgent {
       if (source.dispatchId) {
         updateTaskStatus(source.dispatchId, "processing")
       }
-      // E4.6: Expose this workspace's sandbox to bash_exec during this process turn
-      setActiveSandbox(this.dockerSandbox)
       this.log.debug("process start", {
         providerId,
         modelId,
@@ -540,6 +533,38 @@ export class WorkspaceAgent {
           ...mcpExecutors,
           ...instanceExecutors,
         ])
+
+        // E4.6: Override bash_exec with workspace-scoped Docker sandbox routing
+        if (this.dockerSandbox) {
+          const sandbox = this.dockerSandbox
+          allExecutors.set("bash_exec", async (args, onChunk) => {
+            const { requestPermission } = await import("./permissions")
+            const granted = await requestPermission(
+              "bash_exec",
+              "Run shell command",
+              args.command as string
+            )
+            if (!granted) throw new Error("Execution cancelled by user")
+            if (sandbox.isRunning) {
+              const result = await sandbox.exec(
+                args.command as string,
+                args.cwd as string | undefined,
+                onChunk
+              )
+              return {
+                stdout: result.stdout,
+                stderr: result.stderr,
+                exit_code: result.exitCode,
+              }
+            }
+            // Fallback to host if sandbox stopped unexpectedly
+            const { invoke } = await import("@tauri-apps/api/core")
+            return invoke("bash_exec", {
+              command: args.command,
+              cwd: args.cwd ?? null,
+            })
+          })
+        }
 
         // Apply sandbox restrictions
         const sandboxMode = workspace.sandboxMode ?? "full"
@@ -633,8 +658,6 @@ export class WorkspaceAgent {
       }
     } finally {
       this.callbacks.onStreamingChange?.(false)
-      // E4.6: Clear active sandbox after process turn completes
-      setActiveSandbox(null)
     }
 
     // Persist intermediate tool-call turns (assistant turns + tool results)

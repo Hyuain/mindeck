@@ -22,14 +22,7 @@ function emptyMCPEntry(): MCPEntry {
 
 // ─── Helpers ──────────────────────────────────────────────
 
-function getAppRoleLabel(app: AgentAppManifest): string {
-  if (app.kind === "native") return "Native"
-  if (app.kind === "system") return "System"
-  const parts: string[] = []
-  if (app.mcpDependencies?.length) parts.push("MCP")
-  if (app.harness?.triggers?.length) parts.push("Harness")
-  return parts.length > 0 ? parts.join(" · ") : "App"
-}
+import { getAppRoleLabel } from "@/services/agent-apps/labels"
 
 type CatalogTab = "installed" | "marketplace"
 

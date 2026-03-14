@@ -202,12 +202,18 @@ export default function App() {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keep pool in sync when workspaces are added/removed
+  // Keep pool in sync when workspaces are added/removed (stable key prevents
+  // re-init on unrelated workspace state changes like streaming updates)
+  const workspaceIds = workspaces
+    .map((w) => w.id)
+    .sort()
+    .join(",")
   useEffect(() => {
-    if (workspaces.length > 0) {
-      agentPool.initAll(workspaces)
+    const ws = useWorkspaceStore.getState().workspaces
+    if (ws.length > 0) {
+      agentPool.initAll(ws)
     }
-  }, [workspaces])
+  }, [workspaceIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -233,12 +239,17 @@ export default function App() {
 
   // Load file content when file pane is added
   useEffect(() => {
-    workspacePanes.forEach(async (pane) => {
-      if (pane.type === "file" && pane.filePath && !previewMap[pane.id]) {
+    let cancelled = false
+    const toLoad = workspacePanes.filter(
+      (p) => p.type === "file" && p.filePath && !previewMap[p.id]
+    )
+    Promise.all(
+      toLoad.map(async (pane) => {
         try {
-          const content = await invoke<string>("read_file", { path: pane.filePath })
+          const content = await invoke<string>("read_file", { path: pane.filePath! })
+          if (cancelled) return
           // Determine renderer type based on file extension
-          const ext = pane.filePath.split(".").pop()?.toLowerCase()
+          const ext = pane.filePath!.split(".").pop()?.toLowerCase()
           let rendererType: "markdown" | "code" | "image" | "raw" = "raw"
           if (ext === "md" || ext === "markdown") {
             rendererType = "markdown"
@@ -257,11 +268,14 @@ export default function App() {
             },
           }))
         } catch (err) {
-          console.error("Failed to load file:", err)
+          console.error("Failed to load file pane", pane.filePath, err)
         }
-      }
-    })
-  }, [workspacePanes])
+      })
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [workspacePanes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle preview for a pane
   function handlePreview(paneId: string, content: string) {

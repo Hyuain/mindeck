@@ -180,11 +180,14 @@ interface LoopRunOptions {
 interface LoopRunResult {
   text: string
   workingHistory: AgentMessage[]
+  /** Number of LLM round-trips performed in this loop run */
+  iterationCount: number
 }
 
 async function runLoop(ctx: LoopRunOptions): Promise<LoopRunResult> {
   const { opts, tools, timedOutTools, doomState } = ctx
   let { workingHistory } = ctx
+  let iterationsCompleted = 0
 
   for (let iteration = 0; iteration < ctx.maxIter; iteration++) {
     const { providerId, providerType, modelId } = resolveModel(
@@ -206,7 +209,7 @@ async function runLoop(ctx: LoopRunOptions): Promise<LoopRunResult> {
       opts.signal
     )) {
       if (opts.signal?.aborted) {
-        return { text: accumText, workingHistory }
+        return { text: accumText, workingHistory, iterationCount: iterationsCompleted }
       }
 
       if (chunk.delta) {
@@ -267,6 +270,8 @@ async function runLoop(ctx: LoopRunOptions): Promise<LoopRunResult> {
       pendingCalls.clear()
     }
 
+    iterationsCompleted++
+
     // Append assistant turn
     const assistantTurn: AgentMessage = {
       role: "assistant",
@@ -277,7 +282,7 @@ async function runLoop(ctx: LoopRunOptions): Promise<LoopRunResult> {
 
     // No tool calls — model is done (final response)
     if (completedCalls.length === 0) {
-      return { text: accumText, workingHistory }
+      return { text: accumText, workingHistory, iterationCount: iterationsCompleted }
     }
 
     // Track as intermediate (had tool calls)
@@ -403,6 +408,7 @@ async function runLoop(ctx: LoopRunOptions): Promise<LoopRunResult> {
   return {
     text: `Reached maximum iterations (${ctx.maxIter}). Last response may be incomplete.`,
     workingHistory,
+    iterationCount: iterationsCompleted,
   }
 }
 
@@ -464,14 +470,15 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     finalText = verifyResult.text
   }
 
-  // E4.5: Emit loop completion metric
-  if (opts.onLoopComplete && opts.workspaceId) {
+  // E4.5: Emit loop completion metric (use fallback ID for Majordomo)
+  if (opts.onLoopComplete) {
+    const wsId = opts.workspaceId ?? "__majordomo__"
     const historyStr = JSON.stringify(mainResult.workingHistory)
     opts.onLoopComplete({
       timestamp: new Date().toISOString(),
-      workspaceId: opts.workspaceId,
+      workspaceId: wsId,
       toolsCalled: allToolsCalled,
-      iterations: allToolsCalled.length,
+      iterations: mainResult.iterationCount,
       estimatedTokens: Math.round(historyStr.length / 4),
       durationMs: Date.now() - loopStartedAt,
       doomLoopDetected: doomState.detected,
