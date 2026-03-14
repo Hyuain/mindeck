@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core"
+import { createLogger } from "./logger"
 import type { Message, ToolCall } from "@/types"
+
+const log = createLogger("conversation")
+
+const VALID_ROLES = new Set<string>(["user", "assistant", "system", "tool"])
 
 interface JsonlMessage {
   id: string
@@ -14,7 +19,14 @@ interface JsonlMessage {
   toolName?: string
 }
 
-function fromJsonl(m: JsonlMessage): Message {
+function fromJsonl(m: JsonlMessage): Message | null {
+  if (!VALID_ROLES.has(m.role)) {
+    log.warn("Skipping message with invalid role from disk", {
+      id: m.id,
+      role: m.role,
+    })
+    return null
+  }
   return {
     id: m.id,
     role: m.role as Message["role"],
@@ -49,7 +61,7 @@ export async function loadMessages(workspaceId: string, limit = 100): Promise<Me
     workspaceId,
     limit,
   })
-  return records.map(fromJsonl)
+  return records.map(fromJsonl).filter((m): m is Message => m !== null)
 }
 
 export async function appendMessage(

@@ -35,6 +35,9 @@ export const useChatStore = create<ChatState>((set) => ({
       },
     })),
 
+  /** Alias for appendMessage — semantically indicates a non-persisted streaming placeholder.
+   *  Callers use this when the message will be updated in-place via updateLastMessage
+   *  and should NOT be written to disk until finalized. */
   pushMessageDraft: (workspaceId, message) =>
     set((state) => ({
       messages: {

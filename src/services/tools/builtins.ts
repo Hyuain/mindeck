@@ -7,7 +7,6 @@ import { registerTool } from "./registry"
 import { eventBus } from "@/services/event-bus"
 import { createLogger } from "@/services/logger"
 import { requestPermission } from "@/services/permissions"
-import { getActiveSandbox } from "@/services/workspace-agent"
 import { stripThinkingTags } from "@/services/thinking"
 
 const log = createLogger("builtins")
@@ -119,20 +118,9 @@ export function registerBuiltins(): void {
       )
       if (!granted) throw new Error("Execution cancelled by user")
 
-      // E4.6: Route through Docker sandbox if active (Layer 2)
-      const sandbox = getActiveSandbox()
-      if (sandbox?.isRunning) {
-        const result = await sandbox.exec(
-          args.command as string,
-          args.cwd as string | undefined,
-          onChunk
-        )
-        return {
-          stdout: result.stdout,
-          stderr: result.stderr,
-          exit_code: result.exitCode,
-        }
-      }
+      // E4.6: Docker sandbox routing is handled by workspace-scoped bash_exec
+      // overrides via extraExecutors in workspace-agent.ts (keyed by workspaceId).
+      // This global fallback runs only for non-workspace callers (e.g. Majordomo).
 
       // E4.3: Use streaming variant when caller provides an onChunk callback
       if (onChunk) {

@@ -12,10 +12,6 @@ vi.mock("@/services/permissions", () => ({
   requestPermission: vi.fn().mockResolvedValue(true),
 }))
 
-vi.mock("@/services/workspace-agent", () => ({
-  getActiveSandbox: vi.fn(() => null),
-}))
-
 describe("registerBuiltins", () => {
   beforeEach(() => {
     toolRegistry.clear()

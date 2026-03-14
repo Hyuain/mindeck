@@ -22,14 +22,7 @@ function emptyMCPEntry(): MCPEntry {
 
 // ─── Helpers ──────────────────────────────────────────────
 
-function getAppRoleLabel(app: AgentAppManifest): string {
-  if (app.kind === "native") return "Native"
-  if (app.kind === "system") return "System"
-  const parts: string[] = []
-  if (app.mcpDependencies?.length) parts.push("MCP")
-  if (app.harness?.triggers?.length) parts.push("Harness")
-  return parts.length > 0 ? parts.join(" · ") : "App"
-}
+import { getAppRoleLabel } from "@/services/agent-apps/labels"
 
 type CatalogTab = "installed" | "marketplace"
 
@@ -222,7 +215,10 @@ export function CommandPalette() {
     doMarketplaceInstall(entry, {})
   }
 
-  function doMarketplaceInstall(entry: MCPDirectoryEntry, envValues: Record<string, string>) {
+  function doMarketplaceInstall(
+    entry: MCPDirectoryEntry,
+    envValues: Record<string, string>
+  ) {
     const manifest: AgentAppManifest = {
       ...entry.manifest,
       kind: "custom",
@@ -278,7 +274,12 @@ export function CommandPalette() {
                   <input
                     className="cmd-catalog-install-input"
                     placeholder={env.placeholder ?? env.key}
-                    type={env.key.toLowerCase().includes("key") || env.key.toLowerCase().includes("token") ? "password" : "text"}
+                    type={
+                      env.key.toLowerCase().includes("key") ||
+                      env.key.toLowerCase().includes("token")
+                        ? "password"
+                        : "text"
+                    }
                     value={values[env.key] ?? ""}
                     onChange={(e) =>
                       setMarketplaceEnvForm({
@@ -419,9 +420,15 @@ export function CommandPalette() {
 
                 {filteredCatalogApps.length === 0 && (
                   <div
-                    style={{ padding: "16px 10px", color: "var(--color-t2)", fontSize: 12 }}
+                    style={{
+                      padding: "16px 10px",
+                      color: "var(--color-t2)",
+                      fontSize: 12,
+                    }}
                   >
-                    {catalogQuery ? `No apps found for "${catalogQuery}"` : "No apps installed"}
+                    {catalogQuery
+                      ? `No apps found for "${catalogQuery}"`
+                      : "No apps installed"}
                   </div>
                 )}
 
@@ -543,9 +550,7 @@ export function CommandPalette() {
                         <div className="cmd-catalog-card-name">
                           {entry.manifest.icon} {entry.manifest.name}
                         </div>
-                        <div className="cmd-catalog-card-summary">
-                          {entry.summary}
-                        </div>
+                        <div className="cmd-catalog-card-summary">{entry.summary}</div>
                         {entry.requiredEnv && entry.requiredEnv.length > 0 && (
                           <div className="cmd-catalog-card-env">
                             Requires: {entry.requiredEnv.map((e) => e.key).join(", ")}
@@ -570,7 +575,11 @@ export function CommandPalette() {
 
                 {filteredMarketplace.length === 0 && (
                   <div
-                    style={{ padding: "16px 10px", color: "var(--color-t2)", fontSize: 12 }}
+                    style={{
+                      padding: "16px 10px",
+                      color: "var(--color-t2)",
+                      fontSize: 12,
+                    }}
                   >
                     No marketplace apps found for "{catalogQuery}"
                   </div>
