@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { FilePlus, FolderPlus, RefreshCw } from "lucide-react"
 import type { FileNode } from "@/types"
+import { modal } from "@/components/ui/modal"
 import { FileTree } from "./FileTree"
 
 interface FileExplorerProps {
@@ -76,15 +77,21 @@ export function FileExplorer({ contentRoot }: FileExplorerProps) {
     }
   }
 
-  async function handleDelete(node: FileNode) {
-    if (!window.confirm(`Delete "${node.name}"?`)) return
+  function handleDelete(node: FileNode) {
     const dir = node.path.substring(0, node.path.lastIndexOf("/"))
-    try {
-      await invoke("delete_path", { path: node.path })
-      await loadDir(dir)
-    } catch (err) {
-      console.error("Delete failed:", err)
-    }
+    modal.confirm({
+      message: `Delete "${node.name}"?`,
+      confirmLabel: "Delete",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await invoke("delete_path", { path: node.path })
+          await loadDir(dir)
+        } catch (err) {
+          console.error("Delete failed:", err)
+        }
+      },
+    })
   }
 
   async function handleDrop(srcPath: string, targetDir: string) {

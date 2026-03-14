@@ -227,6 +227,17 @@ body {
 }
 .btn-solid:hover { opacity: 0.85; }
 .btn-solid:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-danger {
+  padding: 6px 15px; border-radius: 5px; border: none;
+  background: #7f1d1d; color: #fca5a5; cursor: pointer;
+  font-family: var(--font-sans); font-size: 12px; font-weight: 500; transition: opacity 0.12s;
+}
+.btn-danger:hover { background: #991b1b; }
+[data-theme="light"] .btn-danger { background: #dc2626; color: #fff; }
+[data-theme="light"] .btn-danger:hover { background: #b91c1c; }
+.modal-confirm-body {
+  padding: 16px 20px; font-size: 13px; color: var(--color-t0); line-height: 1.5;
+}
 
 /* ─── SETTINGS MODAL ─────────────────────────────────────── */
 .settings-body { display: flex; height: 460px; }
@@ -334,11 +345,15 @@ body {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .model-lbl b { color: var(--color-t0); font-weight: 500; }
-.model-dropdown {
-  min-width: 220px;
+/* ─── SHARED POPOVER BASE ──────────────────────────────── */
+.popover-panel {
   background: var(--color-bg-2); border: 1px solid var(--color-bdh);
   border-radius: 8px; box-shadow: 0 8px 32px var(--color-shl);
-  overflow: hidden; padding: 4px;
+  padding: 4px;
+}
+
+.model-dropdown {
+  min-width: 220px; max-height: min(360px, 80vh); overflow-y: auto;
 }
 .model-group-label {
   font-size: 9.5px; font-family: var(--font-mono); text-transform: uppercase;
@@ -380,10 +395,7 @@ body {
 
 /* ─── SLASH COMMAND DROPDOWN ─────────────────────────────── */
 .slash-dropdown {
-  background: var(--color-bg-2); border: 1px solid var(--color-bdh);
-  border-radius: 8px; box-shadow: 0 8px 32px var(--color-shl);
-  z-index: 20; overflow: hidden; padding: 4px;
-  max-height: 260px; overflow-y: auto;
+  max-height: 260px; overflow-y: auto; overflow-x: hidden;
 }
 .slash-item {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
@@ -649,17 +661,9 @@ body {
 }
 .layout-toggle-btn:hover { background: var(--color-bg-3); color: var(--color-t1); }
 .layout-toggle-popup {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  background: var(--color-bg-2);
-  border: 1px solid var(--color-bd);
-  border-radius: 8px;
-  padding: 8px;
   display: flex;
   gap: 6px;
-  z-index: 100;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  padding: 8px;
 }
 .layout-col-btn {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
@@ -2456,8 +2460,6 @@ body.is-resizing .right-panel {
 
 .context-menu {
   min-width: 160px; max-width: 240px;
-  background: var(--color-bg-2); border: 1px solid var(--color-bd);
-  border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px var(--color-shl);
   font-size: 11px; font-family: var(--font-sans);
 }
 .context-menu-item {
@@ -2476,10 +2478,6 @@ body.is-resizing .right-panel {
 /* ─── AppCatalogPicker popover ────────────────────────────────────────────── */
 
 .app-picker-popover {
-  position: absolute; top: calc(100% + 4px); left: 0;
-  width: 240px; z-index: 200;
-  background: var(--color-bg-1); border: 1px solid var(--color-bd);
-  border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.35);
   display: flex; flex-direction: column; overflow: hidden;
 }
 .app-picker-search {

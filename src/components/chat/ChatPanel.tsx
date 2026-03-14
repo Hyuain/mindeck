@@ -14,6 +14,7 @@ import { MessageList } from "./MessageList"
 import { ChatInput } from "./ChatInput"
 import { ToolActivityRow } from "@/components/majordomo/ToolActivityRow"
 import { useAgentsStore } from "@/stores/agents"
+import { modal } from "@/components/ui/modal"
 import type { ToolActivity, Workspace } from "@/types"
 
 interface ChatPanelProps {
@@ -34,7 +35,6 @@ export function ChatPanel({ workspace, onPreview, onClose }: ChatPanelProps) {
 
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([])
   const [pendingDispatch, setPendingDispatch] = useState<string | null>(null)
-  const [confirmClear, setConfirmClear] = useState(false)
 
   const msgs = messages[workspace.id] ?? []
   const isStreaming = streaming[workspace.id] ?? false
@@ -125,7 +125,6 @@ export function ChatPanel({ workspace, onPreview, onClose }: ChatPanelProps) {
   )
 
   const handleClearContext = useCallback(() => {
-    setConfirmClear(false)
     clearChatMessages(workspace.id)
     clearMessages(workspace.id).catch(console.warn)
   }, [workspace.id, clearChatMessages])
@@ -153,7 +152,14 @@ export function ChatPanel({ workspace, onPreview, onClose }: ChatPanelProps) {
           <div className="chat-head-actions">
             <button
               className="chat-clear-btn"
-              onClick={() => setConfirmClear(true)}
+              onClick={() =>
+                modal.confirm({
+                  message: `Clear conversation history for "${workspace.name}"?`,
+                  confirmLabel: "Clear",
+                  danger: true,
+                  onConfirm: handleClearContext,
+                })
+              }
               title="Clear conversation history"
               disabled={isStreaming || msgs.length === 0}
             >
@@ -186,26 +192,6 @@ export function ChatPanel({ workspace, onPreview, onClose }: ChatPanelProps) {
           disabled={isStreaming}
         />
       </div>
-      {confirmClear && (
-        <div className="mj-confirm-overlay" onClick={() => setConfirmClear(false)}>
-          <div className="mj-confirm" onClick={(e) => e.stopPropagation()}>
-            <p className="mj-confirm-msg">
-              Clear conversation history for &ldquo;{workspace.name}&rdquo;?
-            </p>
-            <div className="mj-confirm-actions">
-              <button
-                className="mj-confirm-cancel"
-                onClick={() => setConfirmClear(false)}
-              >
-                Cancel
-              </button>
-              <button className="mj-confirm-delete" onClick={handleClearContext}>
-                Clear
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }

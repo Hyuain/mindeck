@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react"
-import { createPortal } from "react-dom"
+import { Popover } from "./Popover"
+import { Z } from "./layers"
 
 export interface ContextMenuItem {
   id: string
@@ -18,35 +18,17 @@ interface ContextMenuProps {
 }
 
 export function ContextMenu({ items, position, onSelect, onClose }: ContextMenuProps) {
-  const menuRef = useRef<HTMLDivElement>(null)
+  // Synthesise a zero-size DOMRect at the cursor position
+  const anchor = new DOMRect(position.x, position.y, 0, 0)
 
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose()
-    }
-    document.addEventListener("mousedown", handleClick)
-    document.addEventListener("keydown", handleKey)
-    return () => {
-      document.removeEventListener("mousedown", handleClick)
-      document.removeEventListener("keydown", handleKey)
-    }
-  }, [onClose])
-
-  // Adjust position to keep menu on screen
-  const style: React.CSSProperties = {
-    position: "fixed",
-    left: position.x,
-    top: position.y,
-    zIndex: 9999,
-  }
-
-  return createPortal(
-    <div ref={menuRef} className="context-menu" style={style}>
+  return (
+    <Popover
+      anchor={anchor}
+      placement="bottom-start"
+      onClose={onClose}
+      className="popover-panel context-menu"
+      zIndex={Z.CONTEXT_MENU}
+    >
       {items.map((item) => (
         <div key={item.id}>
           {item.dividerBefore && <div className="context-menu-divider" />}
@@ -65,7 +47,6 @@ export function ContextMenu({ items, position, onSelect, onClose }: ContextMenuP
           </button>
         </div>
       ))}
-    </div>,
-    document.body
+    </Popover>
   )
 }

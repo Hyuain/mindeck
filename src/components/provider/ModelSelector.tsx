@@ -1,6 +1,6 @@
 import { useState, useRef } from "react"
-import { createPortal } from "react-dom"
 import { ChevronDown, Circle } from "lucide-react"
+import { Popover } from "@/components/ui/Popover"
 import type { ProviderConfig, Model } from "@/types"
 
 interface ModelSelectorProps {
@@ -16,14 +16,10 @@ export function ModelSelector({
   selectedModelId,
   onChange,
 }: ModelSelectorProps) {
-  const [dropdownPos, setDropdownPos] = useState<{
-    top: number
-    left: number
-    width: number
-  } | null>(null)
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
 
-  const open = dropdownPos !== null
+  const open = anchorRect !== null
 
   const activeProvider = providers.find((p) => p.id === selectedProviderId)
   const activeModel = activeProvider?.models?.find((m) => m.id === selectedModelId)
@@ -32,6 +28,10 @@ export function ModelSelector({
     ? `${activeProvider.name} · ${activeModel?.name ?? selectedModelId}`
     : "Select model"
 
+  function close() {
+    setAnchorRect(null)
+  }
+
   return (
     <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
       <button
@@ -39,10 +39,9 @@ export function ModelSelector({
         className="model-sel"
         onClick={() => {
           if (open) {
-            setDropdownPos(null)
+            close()
           } else if (btnRef.current) {
-            const rect = btnRef.current.getBoundingClientRect()
-            setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width })
+            setAnchorRect(btnRef.current.getBoundingClientRect())
           }
         }}
         aria-haspopup="listbox"
@@ -57,60 +56,73 @@ export function ModelSelector({
         <ChevronDown size={11} style={{ color: "var(--color-t2)", marginLeft: 1 }} />
       </button>
 
-      {open &&
-        createPortal(
-          <>
-            {/* backdrop */}
-            <div
-              style={{ position: "fixed", inset: 0, zIndex: 9999 }}
-              onClick={() => setDropdownPos(null)}
-            />
-            <div
-              className="model-dropdown"
-              role="listbox"
-              style={{
-                position: "fixed",
-                top: dropdownPos.top,
-                left: dropdownPos.left,
-                minWidth: Math.max(dropdownPos.width, 220),
-                zIndex: 10000,
-              }}
+      {open && anchorRect && (
+        <Popover
+          anchor={anchorRect}
+          onClose={close}
+          className="popover-panel model-dropdown"
+          widthMode="min-match"
+        >
+          <ModelDropdownContent
+            providers={providers}
+            selectedProviderId={selectedProviderId}
+            selectedModelId={selectedModelId}
+            onSelect={(providerId, modelId) => {
+              onChange(providerId, modelId)
+              close()
+            }}
+          />
+        </Popover>
+      )}
+    </div>
+  )
+}
+
+/* Shared model list content — reused by MajordomoPanel */
+
+interface ModelDropdownContentProps {
+  providers: ProviderConfig[]
+  selectedProviderId: string
+  selectedModelId: string
+  onSelect: (providerId: string, modelId: string) => void
+}
+
+export function ModelDropdownContent({
+  providers,
+  selectedProviderId,
+  selectedModelId,
+  onSelect,
+}: ModelDropdownContentProps) {
+  return (
+    <div role="listbox">
+      {providers.map((provider) => (
+        <div key={provider.id}>
+          <div className="model-group-label">{provider.name}</div>
+          {(provider.models ?? []).map((model: Model) => (
+            <button
+              key={model.id}
+              role="option"
+              aria-selected={
+                provider.id === selectedProviderId && model.id === selectedModelId
+              }
+              className={`model-option ${
+                provider.id === selectedProviderId && model.id === selectedModelId
+                  ? "on"
+                  : ""
+              }`}
+              onClick={() => onSelect(provider.id, model.id)}
             >
-              {providers.map((provider) => (
-                <div key={provider.id}>
-                  <div className="model-group-label">{provider.name}</div>
-                  {(provider.models ?? []).map((model: Model) => (
-                    <button
-                      key={model.id}
-                      role="option"
-                      aria-selected={
-                        provider.id === selectedProviderId && model.id === selectedModelId
-                      }
-                      className={`model-option ${
-                        provider.id === selectedProviderId && model.id === selectedModelId
-                          ? "on"
-                          : ""
-                      }`}
-                      onClick={() => {
-                        onChange(provider.id, model.id)
-                        setDropdownPos(null)
-                      }}
-                    >
-                      {model.name}
-                    </button>
-                  ))}
-                  {(provider.models ?? []).length === 0 && (
-                    <div className="model-option-empty">No models loaded</div>
-                  )}
-                </div>
-              ))}
-              {providers.length === 0 && (
-                <div className="model-option-empty">No providers configured</div>
-              )}
-            </div>
-          </>,
-          document.body
-        )}
+              {model.name}
+            </button>
+          ))}
+          {(provider.models ?? []).length === 0 && (
+            <div className="model-option-empty">No models loaded</div>
+          )}
+        </div>
+      ))}
+      {providers.length === 0 && (
+        <div className="model-option-empty">No providers configured</div>
+      )}
     </div>
   )
 }

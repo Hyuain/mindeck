@@ -28,7 +28,6 @@ futures-util = "0.3"
 
 [patch.crates-io]
 tao = { git = "https://github.com/tauri-apps/tao" }
-wry = { path = "/tmp/wry-patched" }
 
 [profile.release]
 panic = "abort"

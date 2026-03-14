@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type RefObject } from "react"
+import { useEffect, useRef, type RefObject } from "react"
+import { createPortal } from "react-dom"
+import { Z } from "./layers"
 import type { Skill } from "@/types"
 
 interface SlashCommandDropdownProps {
@@ -14,18 +16,7 @@ export function SlashCommandDropdown({
   onSelect,
   anchorRef,
 }: SlashCommandDropdownProps) {
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(
-    null
-  )
   const listRef = useRef<HTMLDivElement>(null)
-
-  // Position above the anchor element
-  useEffect(() => {
-    const el = anchorRef.current
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    setPos({ top: rect.top - 8, left: rect.left, width: rect.width })
-  }, [anchorRef])
 
   // Scroll selected item into view
   useEffect(() => {
@@ -35,18 +26,23 @@ export function SlashCommandDropdown({
     selected?.scrollIntoView({ block: "nearest" })
   }, [selectedIndex])
 
-  if (!pos || skills.length === 0) return null
+  // Measure anchor at render time so it's always fresh
+  const anchorRect = anchorRef.current?.getBoundingClientRect() ?? null
 
-  return (
+  if (!anchorRect || skills.length === 0) return null
+
+  return createPortal(
     <div
-      className="slash-dropdown"
+      className="popover-panel slash-dropdown"
       ref={listRef}
       style={{
         position: "fixed",
-        bottom: `calc(100vh - ${pos.top}px)`,
-        left: pos.left,
-        width: Math.max(pos.width, 260),
+        bottom: `calc(100vh - ${anchorRect.top - 4}px)`,
+        left: anchorRect.left,
+        width: Math.max(anchorRect.width, 260),
         top: "auto",
+        zIndex: Z.POPOVER,
+        maxHeight: `${anchorRect.top - 8}px`,
       }}
       role="listbox"
     >
@@ -57,7 +53,6 @@ export function SlashCommandDropdown({
           role="option"
           aria-selected={i === selectedIndex}
           onMouseDown={(e) => {
-            // mousedown to avoid blur-before-click issue
             e.preventDefault()
             onSelect(skill)
           }}
@@ -73,6 +68,7 @@ export function SlashCommandDropdown({
           )}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body
   )
 }

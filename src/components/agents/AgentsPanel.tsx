@@ -54,7 +54,7 @@ export function AgentsPanel({
 }: AgentsPanelProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [draggingAgentId, setDraggingAgentId] = useState<string | null>(null)
-  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
   const { workspaces, activeWorkspaceId } = useWorkspaceStore()
@@ -173,7 +173,7 @@ export function AgentsPanel({
       previewEl.style.cssText = `
         position: fixed;
         pointer-events: none;
-        z-index: 9999;
+        z-index: 10001;
         padding: 5px 11px;
         background: var(--color-sa, #a78bfa);
         color: white;
@@ -352,18 +352,25 @@ export function AgentsPanel({
                   )}
 
                   {workspaceId && (
-                    <div className="agent-app-add-row" style={{ position: "relative" }}>
+                    <div className="agent-app-add-row">
                       <button
                         className="agent-app-add-btn"
-                        onClick={() => setPickerOpen((p) => !p)}
+                        onClick={(e) => {
+                          if (pickerAnchor) {
+                            setPickerAnchor(null)
+                          } else {
+                            setPickerAnchor(e.currentTarget.getBoundingClientRect())
+                          }
+                        }}
                         title="Add Agent App to this workspace"
                       >
                         <Plus size={10} /> Add App
                       </button>
-                      {pickerOpen && (
+                      {pickerAnchor && (
                         <AppCatalogPicker
                           workspaceId={workspaceId}
-                          onClose={() => setPickerOpen(false)}
+                          anchorRect={pickerAnchor}
+                          onClose={() => setPickerAnchor(null)}
                         />
                       )}
                     </div>

@@ -45,6 +45,7 @@ import { AgentAppPane } from "@/components/workspace/AgentAppPane"
 import { ObservabilityDashboard } from "@/components/observability/ObservabilityDashboard"
 import { OrchestratorSettings } from "@/components/workspace/OrchestratorSettings"
 import { AgentAppSettings } from "@/components/workspace/AgentAppSettings"
+import { ModalHost } from "@/components/ui/ModalHost"
 import type { AgentAppManifest, RenderableContent, Skill } from "@/types"
 
 export default function App() {
@@ -495,6 +496,7 @@ export default function App() {
           onClose={() => setAppSettingsTarget(null)}
         />
       )}
+      <ModalHost />
     </div>
   )
 }

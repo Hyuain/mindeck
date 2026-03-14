@@ -3,17 +3,18 @@ import { LayoutGrid, Check } from "lucide-react"
 import { useAgentAppsStore } from "@/stores/agent-apps"
 import { useUIStore } from "@/stores/ui"
 import { useWorkspaceStore } from "@/stores/workspace"
+import { Popover } from "@/components/ui/Popover"
 
 interface AppCatalogPickerProps {
   workspaceId: string
+  anchorRect: DOMRect
   onClose: () => void
 }
 
-export function AppCatalogPicker({ workspaceId, onClose }: AppCatalogPickerProps) {
+export function AppCatalogPicker({ workspaceId, anchorRect, onClose }: AppCatalogPickerProps) {
   const [query, setQuery] = useState("")
-  const [labelPrompt, setLabelPrompt] = useState<string | null>(null) // appId needing label
+  const [labelPrompt, setLabelPrompt] = useState<string | null>(null)
   const [labelValue, setLabelValue] = useState("")
-  const ref = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const { installedApps, activateApp } = useAgentAppsStore()
@@ -27,17 +28,6 @@ export function AppCatalogPicker({ workspaceId, onClose }: AppCatalogPickerProps
     inputRef.current?.focus()
   }, [])
 
-  // Close on outside click
-  useEffect(() => {
-    function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener("mousedown", onDown)
-    return () => document.removeEventListener("mousedown", onDown)
-  }, [onClose])
-
   const filtered = installedApps.filter(
     (a) =>
       !query ||
@@ -48,7 +38,6 @@ export function AppCatalogPicker({ workspaceId, onClose }: AppCatalogPickerProps
   function handleActivate(appId: string) {
     const instanceCount = activatedApps.filter((i) => i.appId === appId).length
     if (instanceCount > 0) {
-      // Multiple instances — ask for label
       setLabelPrompt(appId)
       setLabelValue(`Instance ${instanceCount + 1}`)
       return
@@ -68,7 +57,11 @@ export function AppCatalogPicker({ workspaceId, onClose }: AppCatalogPickerProps
   const mcpApps = filtered.filter((a) => a.kind === "custom")
 
   return (
-    <div ref={ref} className="app-picker-popover">
+    <Popover
+      anchor={anchorRect}
+      onClose={onClose}
+      className="popover-panel app-picker-popover"
+    >
       {labelPrompt ? (
         <div className="app-picker-label-prompt">
           <p className="app-picker-label-desc">
@@ -167,11 +160,11 @@ export function AppCatalogPicker({ workspaceId, onClose }: AppCatalogPickerProps
                 openAppCatalog()
               }}
             >
-              <LayoutGrid size={10} /> Browse Catalog (⌘K)
+              <LayoutGrid size={10} /> Browse Catalog ({"\u2318"}K)
             </button>
           </div>
         </>
       )}
-    </div>
+    </Popover>
   )
 }

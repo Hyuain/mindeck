@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.1",
@@ -21,13 +22,16 @@
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
     "@vitejs/plugin-react": "^5.1.4",
+    "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^10.0.2",
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^17.4.0",
+    "happy-dom": "^20.8.4",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^4.1.0"
   },
   "dependencies": {
     "dompurify": "^3.3.3",

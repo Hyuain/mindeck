@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef } from "react"
 import { useLayoutStore } from "@/stores/layout"
+import { Popover } from "./Popover"
 
 /** Mini SVG showing a 3-column layout with one column highlighted. */
 function ColIcon({ highlight }: { highlight: "left" | "center" | "right" }) {
@@ -48,38 +49,33 @@ export function LayoutToggle() {
   const { showLeft, showCenter, showRight, setShowLeft, setShowCenter, setShowRight } =
     useLayoutStore()
 
-  const [open, setOpen] = useState(false)
-  const wrapRef = useRef<HTMLDivElement>(null)
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
 
-  // Close popup when clicking outside
-  useEffect(() => {
-    if (!open) return
-    function onPointerDown(e: PointerEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener("pointerdown", onPointerDown)
-    return () => document.removeEventListener("pointerdown", onPointerDown)
-  }, [open])
+  const open = anchorRect !== null
 
   /** Toggle a column's visibility — always keep at least one column shown. */
   function toggle(col: "left" | "center" | "right") {
     const states = { left: showLeft, center: showCenter, right: showRight }
     const setters = { left: setShowLeft, center: setShowCenter, right: setShowRight }
     const current = states[col]
-    // Count currently visible columns
     const visibleCount = [showLeft, showCenter, showRight].filter(Boolean).length
-    // Prevent hiding the last visible column
     if (current && visibleCount === 1) return
     setters[col](!current)
   }
 
   return (
-    <div ref={wrapRef} style={{ position: "relative" }}>
+    <div>
       <button
+        ref={btnRef}
         className="layout-toggle-btn"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          if (open) {
+            setAnchorRect(null)
+          } else if (btnRef.current) {
+            setAnchorRect(btnRef.current.getBoundingClientRect())
+          }
+        }}
         title="Toggle columns"
         aria-expanded={open}
       >
@@ -100,8 +96,13 @@ export function LayoutToggle() {
         </svg>
       </button>
 
-      {open && (
-        <div className="layout-toggle-popup" role="dialog" aria-label="Layout columns">
+      {open && anchorRect && (
+        <Popover
+          anchor={anchorRect}
+          placement="bottom-end"
+          onClose={() => setAnchorRect(null)}
+          className="popover-panel layout-toggle-popup"
+        >
           <button
             className={`layout-col-btn${showLeft ? " active" : ""}`}
             onClick={() => toggle("left")}
@@ -126,7 +127,7 @@ export function LayoutToggle() {
             <ColIcon highlight="right" />
             <span className="layout-col-label">Right</span>
           </button>
-        </div>
+        </Popover>
       )}
     </div>
   )

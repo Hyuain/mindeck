@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm"
 import remarkBreaks from "remark-breaks"
 import rehypeHighlight from "rehype-highlight"
 import type { Message } from "@/types"
+import { stripThinkingTags } from "@/services/thinking"
 import { AgentTag } from "./AgentTag"
 import { ToolResultBubble } from "./ToolResultBubble"
 
@@ -26,26 +27,30 @@ interface ParsedContent {
  */
 export function parseThinkingBlocks(content: string, isStreaming = false): ParsedContent {
   const thinkingBlocks: string[] = []
-  let cleaned = content
-    .replace(/<thinking>([\s\S]*?)<\/thinking>/gi, (_, inner: string) => {
-      thinkingBlocks.push(inner.trim())
-      return ""
-    })
-    .replace(/<think>([\s\S]*?)<\/think>/gi, (_, inner: string) => {
-      thinkingBlocks.push(inner.trim())
-      return ""
-    })
+
+  // Extract thinking blocks into the array (for collapsible UI)
+  content.replace(/<thinking>([\s\S]*?)<\/thinking>/gi, (_, inner: string) => {
+    thinkingBlocks.push(inner.trim())
+    return ""
+  })
+  content.replace(/<think>([\s\S]*?)<\/think>/gi, (_, inner: string) => {
+    thinkingBlocks.push(inner.trim())
+    return ""
+  })
+
+  // Strip closed tags via shared utility
+  let cleaned = stripThinkingTags(content)
 
   // During streaming, handle unclosed thinking tags (closing tag hasn't arrived yet)
   if (isStreaming) {
     const unclosedMatch = cleaned.match(/<think(?:ing)?>([\s\S]*)$/i)
     if (unclosedMatch) {
       thinkingBlocks.push(unclosedMatch[1].trim() + " …")
-      cleaned = cleaned.slice(0, unclosedMatch.index)
+      cleaned = cleaned.slice(0, unclosedMatch.index).trim()
     }
   }
 
-  return { thinkingBlocks, mainContent: cleaned.trim() }
+  return { thinkingBlocks, mainContent: cleaned }
 }
 
 function getSenderLabel(message: Message, variant: "ws" | "mj"): string {
@@ -82,7 +87,11 @@ export function ThinkingBlock({ content }: { content: string }) {
   )
 }
 
-export function MessageBubble({ message, isStreaming, variant = "ws" }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  isStreaming,
+  variant = "ws",
+}: MessageBubbleProps) {
   // Tool result messages get their own compact collapsible UI
   if (message.role === "tool") {
     return <ToolResultBubble message={message} />
@@ -90,8 +99,10 @@ export function MessageBubble({ message, isStreaming, variant = "ws" }: MessageB
 
   const isUser = message.role === "user"
   // These decorations are workspace-only (dispatch dividers, sub-agent tags)
-  const isFromMajordomo = variant === "ws" && isUser && message.metadata?.source === "majordomo"
-  const isSubAgent = variant === "ws" && message.role === "assistant" && !!message.metadata?.agentId
+  const isFromMajordomo =
+    variant === "ws" && isUser && message.metadata?.source === "majordomo"
+  const isSubAgent =
+    variant === "ws" && message.role === "assistant" && !!message.metadata?.agentId
 
   const senderLabel = getSenderLabel(message, variant)
 

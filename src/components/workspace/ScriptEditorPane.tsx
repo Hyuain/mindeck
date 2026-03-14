@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { Plus, Save, Trash2 } from "lucide-react"
+import { modal } from "@/components/ui/modal"
 import { createLogger } from "@/services/logger"
 import { homeDir } from "@tauri-apps/api/path"
 
@@ -103,21 +104,26 @@ export function ScriptEditorPane() {
     }
   }
 
-  async function handleDelete() {
+  function handleDelete() {
     if (!selectedPath) return
-    const confirmed = window.confirm(`Delete ${selectedPath.split("/").pop()}?`)
-    if (!confirmed) return
-    try {
-      const filename = selectedPath.split("/").pop() ?? selectedPath
-      await invoke("delete_script", { filename })
-      addLog(`Deleted: ${selectedPath.split("/").pop()}`)
-      setSelectedPath(null)
-      setContent("")
-      setDirty(false)
-      await loadScripts()
-    } catch (err) {
-      addLog(`Error deleting: ${err}`)
-    }
+    const fileName = selectedPath.split("/").pop() ?? selectedPath
+    modal.confirm({
+      message: `Delete ${fileName}?`,
+      confirmLabel: "Delete",
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await invoke("delete_script", { filename: fileName })
+          addLog(`Deleted: ${fileName}`)
+          setSelectedPath(null)
+          setContent("")
+          setDirty(false)
+          await loadScripts()
+        } catch (err) {
+          addLog(`Error deleting: ${err}`)
+        }
+      },
+    })
   }
 
   return (
