@@ -2,14 +2,12 @@ import { useState } from "react"
 import {
   Bot,
   Cpu,
-  ChevronRight,
-  ChevronDown,
   LayoutGrid,
   Plus,
-  Unplug,
   Settings,
   RefreshCw,
   PowerOff,
+  Unplug,
 } from "lucide-react"
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useAgentsStore } from "@/stores/agents"
@@ -17,14 +15,11 @@ import { useAgentAppsStore } from "@/stores/agent-apps"
 import { useUIStore } from "@/stores/ui"
 import { useDragState } from "@/services/drag-state"
 import type { DragPreview } from "@/services/drag-state"
+import { AgentAppNode } from "./AgentCard"
 import { AppCatalogPicker } from "./AppCatalogPicker"
 import { ContextMenu } from "@/components/ui/ContextMenu"
 import type { ContextMenuItem } from "@/components/ui/ContextMenu"
 import type { AgentAppManifest, AppInstance } from "@/types"
-
-// ─── Helpers ───────────────────────────────────────────────
-
-import { getAppRoleLabel } from "@/services/agent-apps/labels"
 
 // ─── Context menu state ──────────────────────────────────
 
@@ -36,95 +31,7 @@ interface ContextMenuState {
     | { type: "app"; workspaceId: string; instanceId: string; appId: string }
 }
 
-// ─── AgentAppNode ──────────────────────────────────────────
-
-interface AgentAppNodeProps {
-  instance: AppInstance
-  manifest: AgentAppManifest
-  workspaceId: string
-  onPointerDown?: (e: React.PointerEvent) => void
-  onContextMenu?: (e: React.MouseEvent) => void
-}
-
-function AgentAppNode({
-  instance,
-  manifest,
-  workspaceId,
-  onPointerDown,
-  onContextMenu,
-}: AgentAppNodeProps) {
-  const [expanded, setExpanded] = useState(false)
-  const { deactivateApp } = useAgentAppsStore()
-
-  const label = instance.label ? `${manifest.name} (${instance.label})` : manifest.name
-
-  const mcpCount = manifest.mcpDependencies?.length ?? 0
-  const triggerSummary = manifest.harness?.triggers
-    .map((t) => {
-      if (t.event === "file_written" && t.pattern) return `file_written ${t.pattern}`
-      return t.event
-    })
-    .join(", ")
-
-  return (
-    <div className="agent-app-node">
-      <div
-        className="agent-tree-item agent-app-node-row"
-        onClick={() => setExpanded((e) => !e)}
-        onPointerDown={onPointerDown}
-        onContextMenu={onContextMenu}
-        style={{ userSelect: "none", cursor: onPointerDown ? "grab" : "pointer" }}
-      >
-        <div className="agent-tree-connector" />
-        <div className="agent-tree-icon sub-agent">
-          <LayoutGrid size={10} />
-        </div>
-        <span className="agent-tree-label">{label}</span>
-        {instance.label && (
-          <span className="agent-app-instance-label">{instance.label}</span>
-        )}
-        <span className="agent-app-kind-badge">{getAppRoleLabel(manifest)}</span>
-        {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-      </div>
-
-      {expanded && (
-        <div className="agent-app-node-detail">
-          {manifest.nativeComponent && (
-            <div className="agent-app-node-detail-row">
-              <span className="agent-app-node-detail-label">Type:</span>
-              <span>Built-in · {manifest.nativeComponent}</span>
-            </div>
-          )}
-          {mcpCount > 0 && (
-            <div className="agent-app-node-detail-row">
-              <span className="agent-app-node-detail-label">MCPs:</span>
-              <span>
-                {mcpCount} server{mcpCount !== 1 ? "s" : ""}
-              </span>
-            </div>
-          )}
-          {triggerSummary && (
-            <div className="agent-app-node-detail-row">
-              <span className="agent-app-node-detail-label">Triggers:</span>
-              <span className="agent-app-node-detail-trigger">{triggerSummary}</span>
-            </div>
-          )}
-          <button
-            className="agent-app-node-deactivate"
-            onClick={(e) => {
-              e.stopPropagation()
-              deactivateApp(workspaceId, instance.instanceId)
-            }}
-          >
-            <Unplug size={9} /> Deactivate
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Types ─────────────────────────────────────────────────
+// ---- Types ----
 
 interface AgentNode {
   id: string
@@ -132,7 +39,7 @@ interface AgentNode {
   workspaceId: string
 }
 
-// ─── Main component ────────────────────────────────────────
+// ---- Main component ----
 
 interface AgentsPanelProps {
   workspaceId?: string
@@ -158,7 +65,6 @@ export function AgentsPanel({
   const activeWorkspace = workspaces.find((ws) => ws.id === activeWorkspaceId)
   const activatedApps = activeWorkspace?.activatedApps ?? []
 
-  // Resolve instance → manifest pairs
   const instancesWithManifest = activatedApps
     .map((inst) => ({
       instance: inst,
@@ -169,7 +75,7 @@ export function AgentsPanel({
         x.manifest !== undefined
     )
 
-  // ── Context menu handlers ─────────────────────────────────
+  // ---- Context menu handlers ----
 
   function handleOrchestratorContextMenu(e: React.MouseEvent, wsId: string) {
     e.preventDefault()
@@ -231,7 +137,6 @@ export function AgentsPanel({
     const { target } = contextMenu
     if (target.type === "orchestrator") {
       if (id === "settings") onOpenOrchestratorSettings?.()
-      // reconnect-mcp handled elsewhere (future wiring)
     } else if (target.type === "app") {
       if (id === "app-settings") onOpenAppSettings?.(target.instanceId, target.appId)
       if (id === "deactivate") deactivateApp(target.workspaceId, target.instanceId)
@@ -243,7 +148,7 @@ export function AgentsPanel({
     setContextMenu(null)
   }
 
-  // ── Agent drag ───────────────────────────────────────────
+  // ---- Agent drag ----
 
   const startDrag = (e: React.PointerEvent, dragData: DragPreview) => {
     if (e.button !== 0) return
@@ -321,7 +226,7 @@ export function AgentsPanel({
     })
   }
 
-  // ── Agent tree data ──────────────────────────────────────
+  // ---- Agent tree data ----
 
   const agents: AgentNode[] = workspaces
     .filter((ws) => ws.id === activeWorkspaceId)
@@ -331,11 +236,10 @@ export function AgentsPanel({
       workspaceId: ws.id,
     }))
 
-  // ── Render ───────────────────────────────────────────────
+  // ---- Render ----
 
   return (
     <>
-      {/* Header */}
       <div className="agents-apps-header">
         <div className="agents-apps-title">
           <Bot size={12} />
@@ -352,7 +256,6 @@ export function AgentsPanel({
         </div>
       </div>
 
-      {/* Unified agents + app instances tree */}
       <div className="agents-panel">
         {agents.length === 0 ? (
           <div className="agent-tree-empty">
@@ -370,7 +273,6 @@ export function AgentsPanel({
 
               return (
                 <div key={agent.id} className="agent-tree-node">
-                  {/* Orchestrator row */}
                   <div
                     className={`agent-tree-item ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
                     onClick={() => setSelectedAgentId(agent.id)}
@@ -389,7 +291,6 @@ export function AgentsPanel({
                     )}
                   </div>
 
-                  {/* Sub-agents spawned during this session */}
                   {children.length > 0 && (
                     <div className="agent-tree-children">
                       {children.map((sub) => (
@@ -419,7 +320,6 @@ export function AgentsPanel({
                     </div>
                   )}
 
-                  {/* Activated app instances */}
                   {workspaceId && instancesWithManifest.length > 0 && (
                     <div className="agent-tree-children">
                       {instancesWithManifest.map(({ instance, manifest }) => (
@@ -451,7 +351,6 @@ export function AgentsPanel({
                     </div>
                   )}
 
-                  {/* [+ Add App] row */}
                   {workspaceId && (
                     <div className="agent-app-add-row" style={{ position: "relative" }}>
                       <button
@@ -476,7 +375,6 @@ export function AgentsPanel({
         )}
       </div>
 
-      {/* Context menu portal */}
       {contextMenu && (
         <ContextMenu
           items={contextMenu.items}

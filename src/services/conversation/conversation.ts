@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
-import { createLogger } from "./logger"
+import { createLogger } from "../logger"
 import type { Message, ToolCall } from "@/types"
 
 const log = createLogger("conversation")

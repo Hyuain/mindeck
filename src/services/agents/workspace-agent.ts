@@ -538,7 +538,7 @@ export class WorkspaceAgent {
         if (this.dockerSandbox) {
           const sandbox = this.dockerSandbox
           allExecutors.set("bash_exec", async (args, onChunk) => {
-            const { requestPermission } = await import("./permissions")
+            const { requestPermission } = await import("../security/permissions")
             const granted = await requestPermission(
               "bash_exec",
               "Run shell command",
