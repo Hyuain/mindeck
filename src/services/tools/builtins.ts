@@ -6,10 +6,9 @@ import { invoke } from "@tauri-apps/api/core"
 import { registerTool } from "./registry"
 import { eventBus } from "@/services/event-bus"
 import { createLogger } from "@/services/logger"
-import { useWorkspaceStore } from "@/stores/workspace"
 import { requestPermission } from "@/services/permissions"
-import { createTask } from "@/services/task-manager"
 import { getActiveSandbox } from "@/services/workspace-agent"
+import { stripThinkingTags } from "@/services/thinking"
 
 const log = createLogger("builtins")
 
@@ -92,21 +91,6 @@ export function registerBuiltins(): void {
     async execute(args) {
       await invoke("delete_path", { path: args.path })
       return "Deleted successfully"
-    },
-  })
-
-  // ── list_workspaces ───────────────────────────────────────
-  registerTool({
-    definition: {
-      name: "list_workspaces",
-      description: "List all Mindeck workspaces with their names, status, and summaries.",
-      parameters: {
-        type: "object",
-        properties: {},
-      },
-    },
-    async execute() {
-      return invoke("list_workspaces")
     },
   })
 
@@ -209,66 +193,6 @@ export function registerBuiltins(): void {
     },
   })
 
-  // ── dispatch_to_workspace ─────────────────────────────────
-  registerTool({
-    definition: {
-      name: "dispatch_to_workspace",
-      description:
-        "Send a task to a specific workspace's agent. Use this to delegate sub-tasks to a workspace. Results are reported back asynchronously — you will receive them when the workspace agent completes.",
-      parameters: {
-        type: "object",
-        properties: {
-          workspaceId: {
-            type: "string",
-            description: "The workspace ID or name to dispatch to",
-          },
-          task: {
-            type: "string",
-            description: "The task or question to send to the workspace agent",
-          },
-        },
-        required: ["workspaceId", "task"],
-      },
-    },
-    async execute(args) {
-      const input = args.workspaceId as string
-
-      // Resolve name/slug → UUID if the model passed a name instead of a UUID
-      const { workspaces } = useWorkspaceStore.getState()
-      const match = workspaces.find(
-        (ws) =>
-          ws.id === input ||
-          ws.name.toLowerCase() === input.toLowerCase() ||
-          ws.name.toLowerCase().replace(/\s+/g, "-") === input.toLowerCase()
-      )
-      const resolvedId = match?.id ?? input
-
-      if (!match) {
-        log.warn(`dispatch_to_workspace: no workspace matched "${input}" — using as-is`)
-      }
-
-      // Create task in TaskStore first (engineering guarantee — not prompt-based)
-      const task = createTask(resolvedId, args.task as string, "majordomo")
-
-      log.info("dispatch_to_workspace", {
-        targetWorkspace: match?.name ?? resolvedId,
-        taskId: task.id,
-        content: (args.task as string).slice(0, 80),
-      })
-
-      // Notify agent via EventBus (real-time delivery; recovery via TaskStore if missed)
-      eventBus.emit("task:dispatch", {
-        id: task.id,
-        sourceType: "majordomo",
-        targetWorkspaceId: resolvedId,
-        task: args.task as string,
-        priority: "normal",
-      })
-
-      return `Task dispatched to "${match?.name ?? resolvedId}" (taskId: ${task.id})`
-    },
-  })
-
   // ── report_to_majordomo ───────────────────────────────────
   registerTool({
     definition: {
@@ -297,10 +221,11 @@ export function registerBuiltins(): void {
         summary: string
         details: string
       }
+      const cleanDetails = stripThinkingTags(details)
       eventBus.emit("task:result", {
         dispatchId: crypto.randomUUID(),
         workspaceId,
-        result: details,
+        result: cleanDetails,
         summary: summary.slice(0, 200),
       })
       log.info("report_to_majordomo: emitted task:result", { workspaceId, summary })

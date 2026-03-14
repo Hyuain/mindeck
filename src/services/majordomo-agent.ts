@@ -11,6 +11,7 @@
  */
 import { runAgentLoop, type AgentLoopResult } from "./agentic-loop"
 import { getToolDefinitions } from "./tools/registry"
+import { createMajordomoWorkspaceTools } from "./tools/majordomo-tools"
 import { makeMessage, appendMajordomoMessage, MAJORDOMO_WS_ID } from "./conversation"
 import { createLogger } from "./logger"
 import { useChatStore } from "@/stores/chat"
@@ -353,6 +354,13 @@ export class MajordomoAgent {
       return `## Skill: ${skill.name}\n\n${instructions.trim()}`
     })
 
+    // Inject Majordomo-only workspace management tools
+    const wsTools = createMajordomoWorkspaceTools()
+    tools.push(...wsTools.definitions)
+    for (const [name, exec] of wsTools.executors) {
+      extraExecutors.set(name, exec)
+    }
+
     // Resolve model capabilities once here so runTurn doesn't need to repeat the lookup.
     const modelId =
       (mjStore.selectedModelId || provider.defaultModel) ?? provider.models?.[0]?.id ?? ""
@@ -376,7 +384,7 @@ export class MajordomoAgent {
       })
       .join("\n")
 
-    const defaultSystem = `You are Majordomo, a global cross-workspace assistant for Mindeck. You have visibility into all workspaces.\n\nCurrent workspace states:\n${summaryText}\n\nBe concise. Reference workspaces by name. Help the user orchestrate their work.\n\nCRITICAL TOOL-USE RULES — VIOLATIONS WILL BE CAUGHT AND REJECTED:\n1. To send work to a workspace, you MUST produce a tool function call for \`dispatch_to_workspace\`. Writing text about dispatching does NOT dispatch — only a real tool call does. The system audits every turn; fake dispatches are automatically detected and rejected.\n2. NEVER write "已派发", "I've dispatched", "task sent", "re-dispatching", "taskId:" or similar UNLESS a tool call was actually produced in this turn. If you describe dispatching without calling the tool, the system will force a retry.\n3. When you want to dispatch, respond ONLY with the tool call — do NOT also write confirmation text. The tool result will confirm success.\n4. If you cannot produce a tool call for any reason, say "I was unable to call the tool" — never pretend you did.\n5. NEVER reproduce system audit lines like "[audit]" or "[Tools actually called:]" in your output.`
+    const defaultSystem = `You are Majordomo, a global cross-workspace assistant for Mindeck. You have visibility into all workspaces.\n\nCurrent workspace states:\n${summaryText}\n\nYou can manage workspaces using the create_workspace, delete_workspace, rename_workspace, and configure_workspace tools.\n\nBe concise. Reference workspaces by name. Help the user orchestrate their work.\n\nCRITICAL TOOL-USE RULES — VIOLATIONS WILL BE CAUGHT AND REJECTED:\n1. To send work to a workspace, you MUST produce a tool function call for \`dispatch_to_workspace\`. Writing text about dispatching does NOT dispatch — only a real tool call does. The system audits every turn; fake dispatches are automatically detected and rejected.\n2. NEVER write "已派发", "I've dispatched", "task sent", "re-dispatching", "taskId:" or similar UNLESS a tool call was actually produced in this turn. If you describe dispatching without calling the tool, the system will force a retry.\n3. When you want to dispatch, respond ONLY with the tool call — do NOT also write confirmation text. The tool result will confirm success.\n4. If you cannot produce a tool call for any reason, say "I was unable to call the tool" — never pretend you did.\n5. NEVER reproduce system audit lines like "[audit]" or "[Tools actually called:]" in your output.`
 
     const alwaysOnSkills = useSkillsStore.getState().getMajordomoActiveSkills()
     const allSkills = useSkillsStore.getState().skills

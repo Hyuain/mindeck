@@ -21,6 +21,7 @@ import { discoverContextRules, buildContextSection } from "./skills/context-inje
 import { mcpManager } from "./mcp/manager"
 import { harnessEngine } from "./harness-engine"
 import { readWorkspaceMemory, appendToWorkspaceMemory } from "./workspace-memory"
+import { stripThinkingTags } from "./thinking"
 import { metricsCollector } from "./observability/metrics-collector"
 import { DockerSandbox } from "./sandbox/docker-sandbox"
 import {
@@ -95,10 +96,6 @@ interface QueuedInput {
   /** Skill IDs selected via slash command for this message only (not always-on) */
   ephemeralSkillIds?: string[]
 }
-
-// Workspace agents must NOT dispatch to other workspaces —
-// only Majordomo orchestrates cross-workspace delegation.
-const WORKSPACE_BLOCKED_TOOLS = ["dispatch_to_workspace"]
 
 const SANDBOX_READ_ONLY_BLOCKED = new Set(["bash_exec", "write_file", "delete_path"])
 
@@ -506,12 +503,7 @@ export class WorkspaceAgent {
           onSubAgentToolEnd: this.callbacks.onToolEnd ?? (() => {}),
           ephemeralSkills: resolvedEphemeralSkills,
         })
-        const toolDefs = [
-          ...getToolDefinitions(allowedTools).filter(
-            (t) => !WORKSPACE_BLOCKED_TOOLS.includes(t.name)
-          ),
-          ...wsTools.definitions,
-        ]
+        const toolDefs = [...getToolDefinitions(allowedTools), ...wsTools.definitions]
 
         // Merge MCP tools into definitions and executors
         // Legacy: workspace mcpDependencies (old model)
@@ -747,12 +739,13 @@ export class WorkspaceAgent {
         workspaceId: this.workspaceId,
         summaryLen: fullContent.length,
       })
-      updateTaskStatus(source.dispatchId, "completed", { result: fullContent })
+      const cleanResult = stripThinkingTags(fullContent)
+      updateTaskStatus(source.dispatchId, "completed", { result: cleanResult })
       eventBus.emit("task:result", {
         dispatchId: source.dispatchId,
         workspaceId: this.workspaceId,
-        result: fullContent,
-        summary: fullContent.slice(0, 200),
+        result: cleanResult,
+        summary: cleanResult.slice(0, 200),
       })
     }
   }
@@ -821,7 +814,6 @@ You have access to these tools:
 - write_file(path, content): Write content to a file
 - delete_path(path): Delete a file or directory
 - bash_exec(command, cwd?): Run a shell command (requires user confirmation)
-- list_workspaces(): List all Mindeck workspaces
 - report_to_majordomo(workspaceId, summary, details): Report results back to Majordomo
 - spawn_sub_agent(name, task): Spawn a temporary sub-agent to handle a focused subtask. The sub-agent runs autonomously and returns its result to you.
 - spawn_sub_agent_team(agents): Spawn multiple sub-agents IN PARALLEL. Pass an array of {name, task} objects. All sub-agents run simultaneously and their results are returned together. Use this to parallelize independent subtasks (e.g. one sub-agent per topic, file, or software).
