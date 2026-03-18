@@ -72,6 +72,15 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
 
   return (
     <div ref={panelRef} className="mj-panel" style={{ width: majordomoWidth }}>
+      <MajordomoWorkspaceList summaries={summaries} tasksByWorkspace={tasksByWorkspace} />
+
+      <MajordomoTaskList
+        messages={messages}
+        isStreaming={isStreaming}
+        activeToolActivities={activeToolActivities}
+        pendingPermissions={pendingPermissions}
+      />
+
       <MajordomoInput
         isStreaming={isStreaming}
         messages={messages}
@@ -79,18 +88,6 @@ export function MajordomoPanel({ panelRef }: MajordomoPanelProps) {
         selectedModelId={selectedModelId}
         setModel={setModel}
         onSend={handleSend}
-      />
-
-      <MajordomoWorkspaceList
-        summaries={summaries}
-        tasksByWorkspace={tasksByWorkspace}
-      />
-
-      <MajordomoTaskList
-        messages={messages}
-        isStreaming={isStreaming}
-        activeToolActivities={activeToolActivities}
-        pendingPermissions={pendingPermissions}
       />
     </div>
   )

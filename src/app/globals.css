@@ -691,7 +691,8 @@ body {
 }
 .mj-head {
   padding: 10px 14px; display: flex; flex-direction: column;
-  border-bottom: 1px solid var(--color-bdd); flex-shrink: 0;
+  border-top: 1px solid var(--color-bdd); flex-shrink: 0;
+  margin-top: auto;
 }
 .mj-head-row { display: flex; align-items: center; gap: 7px; }
 .mj-icon {
