@@ -75,6 +75,12 @@ Defined in `src/app/globals.css`:
 - `--font-sans`: Plus Jakarta Sans
 - `--font-mono`: JetBrains Mono
 
+## Documentation
+- `docs/specs/` — Design specs and architecture decisions (tracked in git)
+- `docs/plans/` — Implementation plans and working docs (gitignored — code speaks)
+- `docs/architecture/` — System design documents (tracked)
+- `docs/decisions/` — Design decision records (tracked)
+
 ## Git
 Commit types: `feat | fix | refactor | docs | test | chore | perf | ci`
 
