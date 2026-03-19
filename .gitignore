@@ -56,4 +56,4 @@ src-tauri/target/release/bundle/
 # App data (never commit user data)
 .mindeck/
 
-discussions/
+docs/plans
