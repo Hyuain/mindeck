@@ -155,6 +155,8 @@ export interface AgentAppManifest {
     triggers: HarnessTrigger[]
     feedbackToAgent: boolean
   }
+  /** Runtime capabilities — DI injection targets. Separate from `capabilities` which describes what the app exposes. */
+  runtimeCapabilities?: RuntimeCapabilities
 }
 
 /**
@@ -551,3 +553,142 @@ export interface LoopCompletionMetric {
 export type MetricEvent =
   | { type: "tool_call"; data: ToolCallMetric }
   | { type: "loop_complete"; data: LoopCompletionMetric }
+
+// ─── Agent App Runtime Types ─────────────────────────────────
+
+/** What an app needs from the runtime (DI injection targets) */
+export interface RuntimeCapabilities {
+  shell?: boolean
+  llm?: boolean
+  tools?: string[]
+  channel?: boolean
+  pane?: boolean
+  storage?: { scope: "workspace" | "global" }
+}
+
+/** Structured filter for StorageClient.query() — serializable, no function predicates */
+export interface StorageFilter {
+  keyPrefix?: string
+  tags?: string[]
+  since?: string
+}
+
+export type AppStatus = "inactive" | "activating" | "active" | "error" | "deactivating"
+
+export interface AppHealth {
+  appId: string
+  status: AppStatus
+  lastDispatch?: { timestamp: string; success: boolean; durationMs: number }
+  errorCount: number
+  totalDispatches: number
+}
+
+/** Bidirectional channel message between app and workspace agent */
+export interface ChannelMessage {
+  id: string
+  type: "dispatch" | "result" | "query" | "update" | "chunk" | "error"
+  from: string
+  payload: unknown
+  replyTo?: string
+}
+
+/** Bidirectional channel interface — one side per endpoint */
+export interface AppChannel {
+  request(msg: Omit<ChannelMessage, "id">, signal?: AbortSignal): Promise<ChannelMessage>
+  onRequest(handler: (msg: ChannelMessage) => Promise<ChannelMessage>): void
+  send(msg: Omit<ChannelMessage, "id">): void
+  onMessage(handler: (msg: ChannelMessage) => void): void
+  close(): void
+}
+
+/** Shell command execution client */
+export interface ShellClient {
+  exec(command: string, cwd?: string): Promise<ShellResult>
+}
+
+export interface ShellResult {
+  stdout: string
+  stderr: string
+  exitCode: number
+}
+
+/** LLM chat client — facade over provider bridge */
+export interface LLMClient {
+  chat(
+    messages: AgentMessage[],
+    tools?: ToolDefinition[],
+    signal?: AbortSignal
+  ): AsyncIterable<LLMChunk>
+}
+
+export interface LLMChunk {
+  type: "text" | "tool_call_start" | "tool_call_args" | "tool_call_end"
+  content?: string
+  toolCall?: { id: string; name: string; arguments: string }
+}
+
+/** Built-in tool execution client — scoped to declared tools */
+export interface ToolClient {
+  call(name: string, args: Record<string, unknown>): Promise<ToolResult>
+}
+
+export interface ToolResult {
+  ok: boolean
+  result: string
+}
+
+/** Direct user interaction pane for interactive apps */
+export interface PaneClient {
+  open(options?: { title?: string; icon?: string }): void
+  close(): void
+  sendChunk(text: string): void
+  sendMessage(message: PaneMessage): void
+  onUserMessage(handler: (text: string) => void): void
+  onClose(handler: () => void): void
+  isOpen(): boolean
+}
+
+export interface PaneMessage {
+  role: "assistant" | "system"
+  content: string
+  metadata?: Record<string, unknown>
+}
+
+/** Scoped persistent key-value storage per app */
+export interface StorageClient {
+  get<T>(key: string): Promise<T | null>
+  set<T>(key: string, value: T): Promise<void>
+  list(): Promise<string[]>
+  delete(key: string): Promise<void>
+  query(filter: StorageFilter): Promise<Record<string, unknown>>
+}
+
+/** Dependency-injected context provided to each app */
+export interface AppContext {
+  appId: string
+  workspaceId: string
+  workspaceRoot: string
+  shell?: ShellClient
+  llm?: LLMClient
+  tools?: ToolClient
+  channel?: AppChannel
+  pane?: PaneClient
+  storage?: StorageClient
+}
+
+/** Payload for harness trigger events */
+export interface TriggerPayload {
+  filePath?: string
+  toolName?: string
+  toolResult?: string
+  taskId?: string
+}
+
+/** Interface that all Agent Apps implement */
+export interface AgentApp {
+  manifest: AgentAppManifest
+  activate(ctx: AppContext): Promise<void>
+  deactivate?(): Promise<void>
+  handleDispatch?(task: unknown): Promise<unknown>
+  handleTrigger?(event: HarnessTrigger, payload: TriggerPayload): Promise<void>
+}
