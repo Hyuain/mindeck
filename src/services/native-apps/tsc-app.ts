@@ -8,6 +8,7 @@ export const TSC_APP: AgentAppManifest = {
   description: "Runs TypeScript type-checking and reports type errors.",
   nativeComponent: "TscRunner",
   capabilities: { acceptsTasks: false },
+  runtimeCapabilities: { shell: true },
   toolExposure: "isolated",
   permissions: {
     filesystem: "workspace-only",
