@@ -42,6 +42,7 @@ import { ProviderSettings } from "@/components/provider/ProviderSettings"
 import { CommandPalette } from "@/components/majordomo/CommandPalette"
 import { LayoutToggle } from "@/components/ui/LayoutToggle"
 import { AgentAppPane } from "@/components/workspace/AgentAppPane"
+import { AppPaneChat } from "@/components/workspace/AppPaneChat"
 import { ObservabilityDashboard } from "@/components/observability/ObservabilityDashboard"
 import { OrchestratorSettings } from "@/components/workspace/OrchestratorSettings"
 import { AgentAppSettings } from "@/components/workspace/AgentAppSettings"
@@ -315,6 +316,10 @@ export default function App() {
           ? workspaces.find((ws) => ws.id === pane.workspaceId)
           : activeWorkspace
         if (!workspace) return null
+        // Pane-based interactive apps (created by PaneClient) get AppPaneChat
+        if (pane.id.startsWith("app-pane-") && pane.appId) {
+          return <AppPaneChat appId={pane.appId} title={pane.title ?? "Agent App"} />
+        }
         return (
           <AgentAppPane appId={pane.appId} workspaceId={workspace.id} onClose={onClose} />
         )

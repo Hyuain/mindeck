@@ -35,6 +35,10 @@ interface LayoutState {
   setShowRight: (v: boolean) => void
   setWorkspaceLayout: (workspaceId: string, layout: SerializedWorkspaceLayout) => void
   deleteWorkspaceLayout: (workspaceId: string) => void
+  /** Add an app pane to a workspace's layout */
+  addPane: (workspaceId: string, pane: SerializedPane) => void
+  /** Remove an app pane from a workspace's layout by pane ID */
+  removePane: (workspaceId: string, paneId: string) => void
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -60,6 +64,35 @@ export const useLayoutStore = create<LayoutState>()(
         set((state) => {
           const { [workspaceId]: _, ...workspaceLayouts } = state.workspaceLayouts
           return { workspaceLayouts }
+        }),
+      addPane: (workspaceId, pane) =>
+        set((state) => {
+          const existing = state.workspaceLayouts[workspaceId] ?? {
+            panes: [],
+            layout: null,
+          }
+          // Don't add duplicate pane IDs
+          if (existing.panes.some((p) => p.id === pane.id)) return state
+          return {
+            workspaceLayouts: {
+              ...state.workspaceLayouts,
+              [workspaceId]: { ...existing, panes: [...existing.panes, pane] },
+            },
+          }
+        }),
+      removePane: (workspaceId, paneId) =>
+        set((state) => {
+          const existing = state.workspaceLayouts[workspaceId]
+          if (!existing) return state
+          return {
+            workspaceLayouts: {
+              ...state.workspaceLayouts,
+              [workspaceId]: {
+                ...existing,
+                panes: existing.panes.filter((p) => p.id !== paneId),
+              },
+            },
+          }
         }),
     }),
     {

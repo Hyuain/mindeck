@@ -2659,3 +2659,58 @@ body.is-resizing .right-panel {
 .settings-section-title { font-size: 13px; font-weight: 600; color: var(--color-t0); margin: 0 0 4px; }
 .settings-section-desc { font-size: 11px; color: var(--color-t2); margin: 0 0 8px; }
 
+/* ─── APP PANE CHAT ──────────────────────────────────────── */
+.app-pane-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-bg-1);
+}
+.app-pane-chat-header {
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-t0);
+  border-bottom: 1px solid var(--color-bd);
+}
+.app-pane-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+.app-pane-msg {
+  margin-bottom: 12px;
+}
+.app-pane-msg-user .app-pane-msg-content {
+  color: var(--color-t0);
+}
+.app-pane-msg-assistant .app-pane-msg-content {
+  color: var(--color-t1);
+  border-left: 2px solid var(--color-ac);
+  padding-left: 10px;
+}
+.app-pane-msg-system .app-pane-msg-content {
+  color: var(--color-t2);
+  font-style: italic;
+  font-size: 12px;
+}
+.app-pane-chat-input {
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-bd);
+}
+.app-pane-chat-input textarea {
+  width: 100%;
+  background: var(--color-bg-2);
+  color: var(--color-t0);
+  border: 1px solid var(--color-bd);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  resize: none;
+}
+.app-pane-chat-input textarea:focus {
+  outline: none;
+  border-color: var(--color-ac);
+}
+
