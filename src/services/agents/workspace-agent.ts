@@ -34,6 +34,21 @@ import {
 import { ESLINT_APP } from "../native-apps/eslint-app"
 import { TSC_APP } from "../native-apps/tsc-app"
 import { TEST_RUNNER_APP } from "../native-apps/test-runner-app"
+import { AgentAppRuntime } from "../agent-apps/runtime"
+import {
+  createDeepResearcher,
+  DEEP_RESEARCHER_MANIFEST,
+} from "../agent-apps/apps/deep-researcher"
+import {
+  createBrainstormPartner,
+  BRAINSTORM_PARTNER_MANIFEST,
+} from "../agent-apps/apps/brainstorm-partner"
+import {
+  createKnowledgeLinker,
+  KNOWLEDGE_LINKER_MANIFEST,
+} from "../agent-apps/apps/knowledge-linker"
+// createPaneClient will be used when Brainstorm Partner pane integration
+// is connected through the context factory's pane capability injection
 import { useWorkspaceStore } from "@/stores/workspace"
 import { useAgentAppsStore } from "@/stores/agent-apps"
 import { useTaskStore } from "@/stores/tasks"
@@ -163,6 +178,8 @@ export class WorkspaceAgent {
   private pendingHarnessFeedback: Array<{ appName: string; result: string }> = []
   /** E4.6: Active Docker sandbox (Layer 2), null = Layer 1 only */
   private dockerSandbox: DockerSandbox | null = null
+  /** Unified Agent App Runtime for AI-powered apps */
+  private appRuntime: AgentAppRuntime | null = null
 
   constructor(
     private workspace: Workspace,
@@ -325,6 +342,11 @@ export class WorkspaceAgent {
     mcpManager.disconnectWorkspace(this.workspaceId).catch(() => {})
     // E4.8: Disconnect user scripts
     disconnectScriptsFromWorkspace(this.workspaceId)
+    // Stop Agent App Runtime
+    if (this.appRuntime) {
+      this.appRuntime.stop().catch(() => {})
+      this.appRuntime = null
+    }
     // E4.6: Stop Docker sandbox if running
     if (this.dockerSandbox) {
       activeDockerSandboxes.delete(this.workspaceId)
@@ -520,7 +542,58 @@ export class WorkspaceAgent {
           execs.forEach((fn, name) => instanceExecutors.set(name, fn))
         }
 
-        const mergedDefs = [...toolDefs, ...mcpTools, ...instanceTools]
+        // AI-powered app tool definitions (exposed to the LLM)
+        const appToolDefs: import("@/types").ToolDefinition[] = this.appRuntime
+          ? [
+              {
+                name: "deep_research",
+                description:
+                  "Multi-step research on any topic. Fetches sources, reads content, synthesizes a structured report with key findings, sources, and open questions.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    topic: {
+                      type: "string",
+                      description: "The topic or question to research",
+                    },
+                  },
+                  required: ["topic"],
+                },
+              },
+              {
+                name: "brainstorm",
+                description:
+                  "Opens an interactive brainstorm pane for creative thinking. Uses structured frameworks (Six Thinking Hats, First Principles, SCAMPER, Devil's Advocate) to explore a problem from multiple angles.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    problem: {
+                      type: "string",
+                      description: "The problem or question to brainstorm about",
+                    },
+                  },
+                  required: ["problem"],
+                },
+              },
+              {
+                name: "query_knowledge",
+                description:
+                  "Search the workspace knowledge base for indexed information. Returns relevant snippets from previously indexed files.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    question: {
+                      type: "string",
+                      description: "The question to answer from indexed knowledge",
+                    },
+                  },
+                  required: ["question"],
+                },
+              },
+            ]
+          : []
+
+        const mergedDefs = [...toolDefs, ...mcpTools, ...instanceTools, ...appToolDefs]
 
         // H3.8: Apply dynamic action space filtering based on taskIntent
         const taskIntent = workspace.agentConfig.taskIntent
@@ -533,6 +606,29 @@ export class WorkspaceAgent {
           ...mcpExecutors,
           ...instanceExecutors,
         ])
+
+        // Wire AI app tool executors to the runtime
+        if (this.appRuntime) {
+          const rt = this.appRuntime
+          allExecutors.set("deep_research", async (args) => {
+            const result = await rt.dispatch("native.deep-researcher", {
+              topic: args.topic as string,
+            })
+            return JSON.stringify(result)
+          })
+          allExecutors.set("brainstorm", async (args) => {
+            const result = await rt.dispatch("native.brainstorm-partner", {
+              problem: args.problem as string,
+            })
+            return JSON.stringify(result)
+          })
+          allExecutors.set("query_knowledge", async (args) => {
+            const result = await rt.dispatch("native.knowledge-linker", {
+              question: args.question as string,
+            })
+            return JSON.stringify(result)
+          })
+        }
 
         // E4.6: Override bash_exec with workspace-scoped Docker sandbox routing
         if (this.dockerSandbox) {
@@ -931,6 +1027,34 @@ ${workspace.sandboxMode === "read-only" ? "\n⚠️ SANDBOX: This workspace is i
 
     const allApps = [...nativeApps, ...wsApps, ...activatedManifests]
     harnessEngine.start(this.workspaceId, allApps, { workspaceRoot }, this)
+
+    // Start the unified Agent App Runtime for AI-powered apps
+    this.startAppRuntime(workspaceRoot).catch((err) =>
+      this.log.warn("Agent App Runtime start failed", { error: String(err) })
+    )
+  }
+
+  private async startAppRuntime(workspaceRoot: string): Promise<void> {
+    const runtime = new AgentAppRuntime()
+    const providerId = this.workspace.agentConfig.providerId
+    const provider = this.deps.getProvider(providerId)
+    const providerType = provider?.type ?? "openai-compatible"
+    const modelId = this.workspace.agentConfig.modelId
+
+    // Register AI-powered apps
+    runtime.registerApp(DEEP_RESEARCHER_MANIFEST, createDeepResearcher())
+    const brainstormApp = createBrainstormPartner()
+    runtime.registerApp(BRAINSTORM_PARTNER_MANIFEST, brainstormApp)
+    runtime.registerApp(KNOWLEDGE_LINKER_MANIFEST, createKnowledgeLinker())
+
+    // Start with AI app manifests — Knowledge Linker is eager, others are lazy
+    await runtime.start(
+      this.workspaceId,
+      [DEEP_RESEARCHER_MANIFEST, BRAINSTORM_PARTNER_MANIFEST, KNOWLEDGE_LINKER_MANIFEST],
+      { providerId, providerType, modelId, workspaceRoot }
+    )
+
+    this.appRuntime = runtime
   }
 
   /**
